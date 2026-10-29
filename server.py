@@ -754,8 +754,11 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
         key=lambda m: (
             0 if "shared_rules" in m else
             1 if m.startswith("automation.common") else
-            2 if m.startswith("automation.actions") else
-            3,
+            2 if m.endswith(".rules") else
+            3 if m.endswith(".pages") else
+            4 if m.endswith(".action") else
+            5 if m.startswith("automation.actions") else
+            6,
             m,
         )
     )
