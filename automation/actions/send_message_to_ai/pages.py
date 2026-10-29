@@ -76,7 +76,7 @@ class DismissSayHiToMyAiDialogPage(XmlPage):
             controller.click_element(dialog_clickables[-1])
         else:
             controller.click(Point(540, 2085))
-        time.sleep(1.5)
+        time.sleep(3.0)
 
 
 class AiChatReadyFinalPage(XmlPage):
