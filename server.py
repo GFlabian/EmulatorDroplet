@@ -551,16 +551,23 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
     repo_dir = Path(__file__).resolve().parent
     git_output = ""
     try:
-        res = subprocess.run(
-            ["git", "pull", "--ff-only"],
+        subprocess.run(
+            ["git", "fetch", "origin", "main"],
             cwd=str(repo_dir),
             capture_output=True,
             text=True,
             timeout=60,
         )
+        res = subprocess.run(
+            ["git", "reset", "--hard", "origin/main"],
+            cwd=str(repo_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         git_output = (res.stdout + "\n" + res.stderr).strip()
     except Exception as exc:
-        git_output = f"git pull warning: {exc}"
+        git_output = f"git update warning: {exc}"
 
     # Hot-reload automation modules in dependency order (common -> actions -> package root)
     reloaded = []
