@@ -89,11 +89,12 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
         camera_tabs = xml.get_elements_by_id("com.snapchat.android:id/ngs_camera_icon_container")
         if camera_tabs:
             controller.click_element(camera_tabs[0])
-            time.sleep(1.2)
+            time.sleep(2.0)
             xml_after = controller.fetch_xml()
             if is_on_main_page(xml_after):
                 controller.set_location(Location.MAIN_PAGE)
                 return xml_after
+            continue
 
         # 2. If a Search Cancel / Dismiss / Back button is visible, click it
         clicked_back = False

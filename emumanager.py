@@ -831,15 +831,9 @@ class EmulatorManager:
 
     def start_app(self, name, package=SNAPCHAT_PACKAGE):
         """Launch an installed app's main launcher activity on a running emulator."""
-        script = (
-            f"monkey -p {_sh_quote(package)} -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true; "
-            f"act=$(cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {_sh_quote(package)} 2>/dev/null | tr -d '\\r' | tail -n 1); "
-            f"if [ -n \"$act\" ] && [ \"${{act#*/}}\" != \"$act\" ]; then "
-            f"am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n \"$act\" >/dev/null 2>&1 || true; "
-            f"fi"
-        )
+        script = f"monkey -p {_sh_quote(package)} -c android.intent.category.LAUNCHER 1"
         out = self.adb(name, "shell", script, timeout=30)
-        if "Error:" in out or "Exception" in out:
+        if "Error:" in out or "Exception" in out or "No activities found" in out:
             raise EmulatorError(f"starting {package} on {name} failed: {out}")
         self._log(f"{name}: started {package}")
 
