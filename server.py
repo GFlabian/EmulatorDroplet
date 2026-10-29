@@ -103,8 +103,38 @@ class EmulatorRegistry:
 
     def cleanup_previous_run(self):
         db.init_db()
-        db.mark_worker_emulators_cleaned(platform.node())
-        self.manager.delete_all()
+        node = platform.node()
+        db_active = {r["name"]: r for r in db.load_active_emulators_db(worker_name_or_id=node)}
+        adopted = 0
+        for avd_name in list(self.manager.avds()):
+            if self.manager.is_running(avd_name) and avd_name in db_active:
+                rec = db_active[avd_name]
+                emu_id = rec["id"]
+                rec["serial"] = self.manager.serial(avd_name)
+                if rec.get("action") != "IDLE":
+                    rec["action"] = "IDLE"
+                    rec["status"] = "Idle"
+                with self._lock:
+                    self._records[emu_id] = rec
+                    self._emu_actions.setdefault(emu_id, [])
+                db.upsert_emulator(rec)
+                adopted += 1
+            else:
+                try:
+                    self.manager.delete(avd_name)
+                except Exception:
+                    pass
+        # Mark any DB records that were not running as cleaned up
+        for avd_name, rec in db_active.items():
+            if rec["id"] not in self._records:
+                rec["deleted"] = True
+                rec["action"] = "DELETED"
+                rec["status"] = "Deleted on worker restart"
+                rec["serial"] = None
+                rec["final_message"] = rec.get("final_message") or "WORKER_RESTART_CLEANUP"
+                rec["deleted_at"] = _now_iso()
+                db.upsert_emulator(rec)
+        print(f"[server] Adopted {adopted} running emulator(s) from MariaDB.", flush=True)
 
     def _serialize(self, rec: dict) -> dict:
         data = dict(rec)
@@ -735,6 +765,19 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
             reloaded.append(mod_name)
         except Exception:
             pass
+
+    # Rebind top-level symbols and clear cached PhoneController instances so new methods take effect immediately
+    global PhoneController, get_action, list_supported_actions, Location, AutomationError, ActionRecord
+    if "automation" in sys.modules:
+        auto_pkg = sys.modules["automation"]
+        PhoneController = getattr(auto_pkg, "PhoneController", PhoneController)
+        get_action = getattr(auto_pkg, "get_action", get_action)
+        list_supported_actions = getattr(auto_pkg, "list_supported_actions", list_supported_actions)
+        Location = getattr(auto_pkg, "Location", Location)
+        AutomationError = getattr(auto_pkg, "AutomationError", AutomationError)
+        ActionRecord = getattr(auto_pkg, "ActionRecord", ActionRecord)
+    with registry._lock:
+        registry._controllers.clear()
 
     if req and req.restart_service and platform.system().lower() == "linux":
         threading.Timer(1.0, lambda: subprocess.Popen(["systemctl", "restart", "freya-worker"])).start()

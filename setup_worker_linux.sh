@@ -78,6 +78,7 @@ Environment="PATH=${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROO
 ExecStart=${WORKER_DIR}/venv/bin/python ${WORKER_DIR}/server.py --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
+KillMode=process
 LimitNOFILE=65536
 
 [Install]

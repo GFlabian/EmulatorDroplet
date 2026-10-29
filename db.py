@@ -515,6 +515,33 @@ def mark_worker_emulators_cleaned(worker_name_or_id: str):
         print(f"[db] mark_worker_emulators_cleaned error: {exc}", flush=True)
 
 
+def load_active_emulators_db(worker_name_or_id: Optional[str] = None) -> list[dict[str, Any]]:
+    init_db()
+    rows_out: list[dict[str, Any]] = []
+    try:
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                if worker_name_or_id:
+                    cur.execute(
+                        """
+                        SELECT * FROM Emulators_Instances
+                        WHERE deleted = 0 AND (worker_id = %s OR worker_name = %s)
+                        ORDER BY created_at DESC
+                        """,
+                        (worker_name_or_id, worker_name_or_id),
+                    )
+                else:
+                    cur.execute("SELECT * FROM Emulators_Instances WHERE deleted = 0 ORDER BY created_at DESC")
+                for r in cur.fetchall():
+                    rows_out.append(_row_to_emulator_dict(r))
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[db] load_active_emulators_db error: {exc}", flush=True)
+    return rows_out
+
+
 def load_deleted_emulators_db(limit: int = 100, worker_name_or_id: Optional[str] = None) -> list[dict[str, Any]]:
     init_db()
     rows_out: list[dict[str, Any]] = []
