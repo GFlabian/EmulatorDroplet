@@ -27,6 +27,7 @@ fi
 
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT}"
 export ANDROID_HOME="${ANDROID_SDK_ROOT}"
+export EMU_SDK_ROOT="${ANDROID_SDK_ROOT}"
 export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/emulator:${PATH}"
 
 echo "[3/6] Accepting licenses and installing platform-tools, emulator, and Android 16 (36.1) system image..."
@@ -41,11 +42,7 @@ echo "[4/6] Setting up Python virtual environment in ${WORKER_DIR}..."
 cd "${WORKER_DIR}"
 python3 -m venv "${WORKER_DIR}/venv"
 "${WORKER_DIR}/venv/bin/pip" install --upgrade pip
-if [ -f "${WORKER_DIR}/requirements.txt" ]; then
-  "${WORKER_DIR}/venv/bin/pip" install -r "${WORKER_DIR}/requirements.txt"
-else
-  "${WORKER_DIR}/venv/bin/pip" install fastapi uvicorn pydantic requests
-fi
+"${WORKER_DIR}/venv/bin/pip" install -r "${WORKER_DIR}/requirements.txt"
 
 echo "[5/6] Creating systemd service freya-worker.service..."
 cat >/etc/systemd/system/freya-worker.service <<EOF
@@ -57,8 +54,10 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=${WORKER_DIR}
+Environment="EMU_SDK_ROOT=${ANDROID_SDK_ROOT}"
 Environment="ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
 Environment="ANDROID_HOME=${ANDROID_SDK_ROOT}"
+Environment="EMU_AVD_HOME=${WORKER_DIR}/avds"
 Environment="ANDROID_AVD_HOME=${WORKER_DIR}/avds"
 Environment="PATH=${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/emulator:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=${WORKER_DIR}/venv/bin/python ${WORKER_DIR}/server.py --host 0.0.0.0 --port 8000
@@ -75,4 +74,4 @@ systemctl daemon-reload
 systemctl enable freya-worker
 systemctl restart freya-worker
 
-echo "FreyaEmulator Worker setup complete!"
+echo "EmulatorDroplet Worker setup complete!"

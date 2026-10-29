@@ -65,8 +65,14 @@ from botocore.exceptions import ClientError
 import py7zr
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_SDK = Path(os.environ.get("EMU_SDK_ROOT", HERE.parent / "LightWeight"))
-DEFAULT_AVD_HOME = Path(os.environ.get("EMU_AVD_HOME", HERE / "avds"))
+_default_sdk_fallback = Path("/opt/android-sdk") if (not IS_WINDOWS and Path("/opt/android-sdk").exists()) else (HERE.parent / "LightWeight")
+DEFAULT_SDK = Path(
+    os.environ.get("EMU_SDK_ROOT")
+    or os.environ.get("ANDROID_SDK_ROOT")
+    or os.environ.get("ANDROID_HOME")
+    or _default_sdk_fallback
+)
+DEFAULT_AVD_HOME = Path(os.environ.get("EMU_AVD_HOME") or os.environ.get("ANDROID_AVD_HOME") or (HERE / "avds"))
 PROFILES_DIR = Path(os.environ.get("EMU_PROFILES", HERE / "profiles"))
 APKS_DIR = Path(os.environ.get("EMU_APKS_DIR", HERE / "apks"))
 # Android 16 QPR2: its ARM translator runs ARM-only apps that crash on the Android 14 image
