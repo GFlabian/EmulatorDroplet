@@ -480,7 +480,7 @@ class EmulatorManager:
     def spawn(self, name=None, *, model=None, brand=None, manufacturer=None, device=None, product=None,
               build_id=None, fingerprint=None, props=None, profile=None, width=None, height=None,
               density=None, ram_mb=None, cores=None, android=None, image=None, apk=None,
-              username=None, headless=False, slim=True, timeout=300, proxy=None, on_status=None):
+              username=None, headless=False, slim=True, timeout=600, proxy=None, on_status=None):
         """Create an emulator, boot it, install apk (URL or path), load session, and start Snapchat.
 
         apk, username, android, and profile are mandatory.
