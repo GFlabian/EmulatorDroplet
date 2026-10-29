@@ -538,8 +538,10 @@ class EmulatorManager:
         width = width if width is not None else hw.get("width", 720)
         height = height if height is not None else hw.get("height", 1600)
         density = density if density is not None else hw.get("density", 280)
-        ram_mb = ram_mb if ram_mb is not None else hw.get("ram", 2560)
-        cores = cores if cores is not None else hw.get("cores", 4)
+        default_ram = 2048 if not IS_WINDOWS else 2560
+        default_cores = 2 if not IS_WINDOWS else 4
+        ram_mb = ram_mb if ram_mb is not None else hw.get("ram", default_ram)
+        cores = cores if cores is not None else hw.get("cores", default_cores)
         img = self._resolve_image(image)
         props_wanted = self._normalize_props({**(prof or {}).get("props", {}), **(props or {})})
         source = _read_props(img / "source.properties")

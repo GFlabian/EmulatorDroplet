@@ -6,6 +6,7 @@ from automation.actions.add_friend.pages import (
     MainCameraOpenSearchPage,
     SearchClearPreviousPage,
     SearchClickAddUserPage,
+    SearchRetryResultsPage,
     SearchTypeUsernamePage,
     SearchViewAllResultsPage,
     UserAddedFinalPage,
@@ -41,6 +42,7 @@ class AddFriendAction(BaseAction):
             SearchTypeUsernamePage(username),
             SearchClickAddUserPage(username),
             SearchViewAllResultsPage(username),
+            SearchRetryResultsPage(username),
         ]
         final_pages = [UserAddedFinalPage(username)]
 

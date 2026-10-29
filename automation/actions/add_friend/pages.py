@@ -8,6 +8,7 @@ from automation.actions.add_friend.rules import (
     make_search_empty_rule,
     make_search_has_add_button_rule,
     make_search_needs_clear_rule,
+    make_search_retry_results_rule,
     make_search_view_all_results_rule,
     make_user_added_final_rule,
 )
@@ -90,6 +91,23 @@ class SearchViewAllResultsPage(XmlPage):
         if items:
             controller.report_status("Expanding search results...")
             controller.click_element(items[0])
+            time.sleep(2.0)
+
+
+class SearchRetryResultsPage(XmlPage):
+    """If 'Couldn't load results' / 'Try Again' appears on search, clicks Try Again."""
+
+    def __init__(self, target_username: str):
+        super().__init__(make_search_retry_results_rule(target_username))
+
+    def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        btns = xml.get_elements_by_id("retry-button") or xml.get_elements_by_text("Try Again")
+        if btns:
+            controller.report_status("Retrying search results load...")
+            controller.click_element(btns[0])
+            time.sleep(2.5)
+        else:
+            controller.click(Point(985, 2195))
             time.sleep(2.0)
 
 

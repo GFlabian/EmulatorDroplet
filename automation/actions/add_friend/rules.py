@@ -77,6 +77,24 @@ def make_search_view_all_results_rule(target_username: str) -> XmlPageRule:
     return XmlPageRule(include=["search-textfield"], predicate=_pred)
 
 
+def make_search_retry_results_rule(target_username: str) -> XmlPageRule:
+    target = target_username.strip().lower()
+
+    def _pred(xml: Element) -> bool:
+        tfs = xml.get_elements_by_id("search-textfield")
+        if not tfs or target not in tfs[0].text.strip().lower():
+            return False
+        if _has_added_indicator(xml) or _has_add_button(xml):
+            return False
+        return bool(
+            xml.get_elements_by_id("retry-button")
+            or xml.get_elements_by_text("Try Again")
+            or xml.get_elements_by_text_containing("Couldn't load results")
+        )
+
+    return XmlPageRule(include=["search-textfield"], predicate=_pred)
+
+
 def make_user_added_final_rule(target_username: str) -> XmlPageRule:
     target = target_username.strip().lower()
 
@@ -94,6 +112,7 @@ __all__ = [
     "make_search_empty_rule",
     "make_search_has_add_button_rule",
     "make_search_needs_clear_rule",
+    "make_search_retry_results_rule",
     "make_search_view_all_results_rule",
     "make_user_added_final_rule",
 ]
