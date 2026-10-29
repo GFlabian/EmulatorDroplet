@@ -246,11 +246,11 @@ def _kill_pid(pid):
 
 
 def _emulator_pids(pid):
-    """Live processes of the emulator launched as pid: emulator(.exe) and its qemu-system child."""
+    """Live processes of the emulator launched as pid: emulator(.exe) and its qemu-system process."""
     if not pid:
         return []
     return [p for p, parent, exe in _processes()
-            if ((p == pid and exe in ("emulator.exe", "emulator"))
+            if ((p == pid and (exe in ("emulator.exe", "emulator") or exe.startswith("qemu-system")))
                 or (parent == pid and exe.startswith("qemu-system")))
             and _alive(p)]
 
