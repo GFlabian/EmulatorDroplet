@@ -33,6 +33,7 @@ from automation import (
     get_action,
     list_supported_actions,
 )
+import db
 from emumanager import ANDROID_IMAGES, EmulatorError, EmulatorManager
 
 
@@ -101,6 +102,8 @@ class EmulatorRegistry:
         self._delete_flags: set[str] = set()
 
     def cleanup_previous_run(self):
+        db.init_db()
+        db.mark_worker_emulators_cleaned(platform.node())
         self.manager.delete_all()
 
     def _serialize(self, rec: dict) -> dict:
@@ -115,7 +118,11 @@ class EmulatorRegistry:
 
     def list_deleted(self) -> list[dict]:
         with self._lock:
-            return [self._serialize(r) for r in self._records.values() if r["deleted"]]
+            local_del = {r["id"]: self._serialize(r) for r in self._records.values() if r["deleted"]}
+        for d in db.load_deleted_emulators_db(limit=50, worker_name_or_id=platform.node()):
+            if d["id"] not in local_del:
+                local_del[d["id"]] = d
+        return list(local_del.values())
 
     def get(self, emu_id: str) -> Optional[dict]:
         with self._lock:
@@ -125,14 +132,20 @@ class EmulatorRegistry:
     def get_action_record(self, action_id: str) -> Optional[dict]:
         with self._lock:
             act = self._actions.get(action_id)
-            return act.to_dict() if act else None
+            if act:
+                return act.to_dict()
+        return db.get_action_db(action_id)
 
     def list_emulator_actions(self, emu_id: str) -> list[dict]:
         with self._lock:
-            if emu_id not in self._records:
-                raise HTTPException(status_code=404, detail=f"No emulator with id {emu_id!r}")
             ids = self._emu_actions.get(emu_id, [])
-            return [self._actions[aid].to_dict() for aid in reversed(ids) if aid in self._actions]
+            local_list = [self._actions[aid].to_dict() for aid in reversed(ids) if aid in self._actions]
+        if local_list:
+            return local_list
+        db_list = db.list_emulator_actions_db(emu_id, limit=100)
+        if db_list or emu_id in self._records:
+            return db_list
+        raise HTTPException(status_code=404, detail=f"No emulator with id {emu_id!r}")
 
     def create_async(self, req: CreateEmulatorRequest) -> dict:
         apk = req.apk.strip()
@@ -183,10 +196,21 @@ class EmulatorRegistry:
                 "final_message": None,
                 "created_at": _now_iso(),
                 "deleted_at": None,
+                "worker_name": platform.node(),
             }
             self._records[emu_id] = record
             self._emu_actions[emu_id] = []
 
+        db.upsert_emulator(record)
+        db.insert_action_log(
+            emulator_id=emu_id,
+            worker_id=platform.node(),
+            username=username,
+            level="INFO",
+            event_type="LIFECYCLE",
+            location=Location.INITIALIZING,
+            message=f"Creating emulator {avd_name} (Android {req.android}, profile {profile})",
+        )
         thread = threading.Thread(target=self._run_create, args=(emu_id,), daemon=True)
         thread.start()
         return self._serialize(record)
@@ -200,12 +224,18 @@ class EmulatorRegistry:
             serial = self.manager.serial(rec["name"])
             if serial:
                 rec["serial"] = serial
+            snap = dict(rec)
+        db.upsert_emulator(snap)
 
     def _set_location(self, emu_id: str, location: str):
+        snap = None
         with self._lock:
             rec = self._records.get(emu_id)
             if rec and not rec["deleted"]:
                 rec["location"] = location
+                snap = dict(rec)
+        if snap:
+            db.upsert_emulator(snap)
 
     def _get_or_create_controller(self, emu_id: str) -> PhoneController:
         with self._lock:
@@ -219,11 +249,15 @@ class EmulatorRegistry:
                     on_location=lambda loc: self._set_location(emu_id, loc),
                     initial_location=rec.get("location") or Location.MAIN_PAGE,
                     username=rec.get("username") or "",
+                    emulator_id=emu_id,
+                    worker_id=rec.get("worker_id") or platform.node(),
+                    android_version=int(rec.get("android") or 16),
                 )
                 self._controllers[emu_id] = ctrl
             else:
                 ctrl._location = rec.get("location") or ctrl.location
                 ctrl.username = rec.get("username") or ctrl.username
+                ctrl.emulator_id = emu_id
             return ctrl
 
     def _run_create(self, emu_id: str):
@@ -258,6 +292,18 @@ class EmulatorRegistry:
                     rec["status"] = "Idle"
                     self._get_or_create_controller(emu_id)
                     need_cleanup = False
+                snap = dict(rec)
+            db.upsert_emulator(snap)
+            if not need_cleanup:
+                db.insert_action_log(
+                    emulator_id=emu_id,
+                    worker_id=platform.node(),
+                    username=username,
+                    level="INFO",
+                    event_type="LIFECYCLE",
+                    location=Location.MAIN_PAGE,
+                    message=f"Emulator {avd_name} booted and ready on {dev.serial}",
+                )
             if need_cleanup:
                 try:
                     self.manager.delete(avd_name)
@@ -284,6 +330,17 @@ class EmulatorRegistry:
                     rec["serial"] = None
                     rec["final_message"] = f"CREATE_FAILED: {exc}"
                     rec["deleted_at"] = _now_iso()
+                snap = dict(rec)
+            db.upsert_emulator(snap)
+            db.insert_action_log(
+                emulator_id=emu_id,
+                worker_id=platform.node(),
+                username=username,
+                level="ERROR",
+                event_type="LIFECYCLE",
+                location=snap.get("location"),
+                message=snap.get("final_message") or str(exc),
+            )
 
     def start_action_async(self, emu_id: str, req: ExecuteActionRequest) -> dict:
         merged_params = dict(req.params or {})
@@ -335,6 +392,16 @@ class EmulatorRegistry:
             rec["action"] = action_handler.action_name
             rec["status"] = "Starting action..."
             rec["last_action"] = action_record.to_dict()
+            rec_snap = dict(rec)
+            act_snap = action_record.to_dict()
+
+        db.upsert_action(
+            act_snap,
+            worker_id=rec_snap.get("worker_id") or platform.node(),
+            username=rec_snap.get("username"),
+            start_location=rec_snap.get("location"),
+        )
+        db.upsert_emulator(rec_snap)
 
         thread = threading.Thread(
             target=self._run_action,
@@ -342,20 +409,34 @@ class EmulatorRegistry:
             daemon=True,
         )
         thread.start()
-        return action_record.to_dict()
+        return act_snap
 
     def _run_action(self, emu_id: str, action_id: str, action_handler, params: dict[str, Any]):
         ctrl = self._get_or_create_controller(emu_id)
+        ctrl.current_action_id = action_id
+        ctrl.current_action_type = action_handler.action_name
+        start_loc = ctrl.location
 
         def _on_status(st: str):
             self._set_status(emu_id, st)
+            act_snap = None
+            rec_snap = None
             with self._lock:
                 act = self._actions.get(action_id)
                 rec = self._records.get(emu_id)
                 if act and act.state == "RUNNING":
                     act.progress = st
+                    act_snap = act.to_dict()
                     if rec:
-                        rec["last_action"] = act.to_dict()
+                        rec["last_action"] = act_snap
+                        rec_snap = dict(rec)
+            if act_snap:
+                db.upsert_action(
+                    act_snap,
+                    worker_id=(rec_snap or {}).get("worker_id") or platform.node(),
+                    username=(rec_snap or {}).get("username"),
+                    start_location=start_loc,
+                )
 
         ctrl._on_status = _on_status
 
@@ -371,13 +452,25 @@ class EmulatorRegistry:
                 act.error = result.error
                 act.data = result.data or {}
                 act.finished_at = _now_iso()
+                act_snap = act.to_dict()
 
                 if rec and not rec["deleted"] and emu_id not in self._delete_flags:
                     if result.location:
                         rec["location"] = result.location
                     rec["action"] = "IDLE"
                     rec["status"] = "Idle"
-                    rec["last_action"] = act.to_dict()
+                    rec["last_action"] = act_snap
+                rec_snap = dict(rec) if rec else None
+
+            db.upsert_action(
+                act_snap,
+                worker_id=(rec_snap or {}).get("worker_id") or platform.node(),
+                username=(rec_snap or {}).get("username"),
+                start_location=start_loc,
+                end_location=result.location or ctrl.location,
+            )
+            if rec_snap:
+                db.upsert_emulator(rec_snap)
         except BaseException as exc:
             with self._lock:
                 act = self._actions[action_id]
@@ -387,11 +480,26 @@ class EmulatorRegistry:
                 act.progress = f"Failed: {exc}"
                 act.error = str(exc)
                 act.finished_at = _now_iso()
+                act_snap = act.to_dict()
 
                 if rec and not rec["deleted"] and emu_id not in self._delete_flags:
                     rec["action"] = "IDLE"
                     rec["status"] = "Idle"
-                    rec["last_action"] = act.to_dict()
+                    rec["last_action"] = act_snap
+                rec_snap = dict(rec) if rec else None
+
+            db.upsert_action(
+                act_snap,
+                worker_id=(rec_snap or {}).get("worker_id") or platform.node(),
+                username=(rec_snap or {}).get("username"),
+                start_location=start_loc,
+                end_location=ctrl.location,
+            )
+            if rec_snap:
+                db.upsert_emulator(rec_snap)
+        finally:
+            ctrl.current_action_id = None
+            ctrl.current_action_type = None
 
     def delete_emulator(self, emu_id: str) -> dict:
         with self._lock:
@@ -419,7 +527,18 @@ class EmulatorRegistry:
             rec["serial"] = None
             rec["final_message"] = "DELETE_REQUESTED"
             rec["deleted_at"] = _now_iso()
-            return self._serialize(rec)
+            snap = self._serialize(rec)
+        db.upsert_emulator(snap)
+        db.insert_action_log(
+            emulator_id=emu_id,
+            worker_id=platform.node(),
+            username=snap.get("username"),
+            level="INFO",
+            event_type="LIFECYCLE",
+            location=snap.get("location"),
+            message=f"Deleted emulator {avd_name}",
+        )
+        return snap
 
     def run_shell(self, emu_id: str, command: str, timeout: int = 60) -> dict:
         with self._lock:
@@ -581,11 +700,25 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
             timeout=30,
         )
         git_output = (res.stdout + "\n" + res.stderr).strip()
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "-r", str(repo_dir / "requirements.txt")],
+            cwd=str(repo_dir),
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
     except Exception as exc:
         git_output = f"git update warning: {exc}"
 
-    # Hot-reload automation modules in dependency order (common -> actions -> package root)
+    # Hot-reload db, emumanager, and automation modules in dependency order
     reloaded = []
+    for base_mod in ("db", "emumanager"):
+        if base_mod in sys.modules:
+            try:
+                importlib.reload(sys.modules[base_mod])
+                reloaded.append(base_mod)
+            except Exception:
+                pass
     auto_mods = [m for m in sys.modules.keys() if m == "automation" or m.startswith("automation.")]
     auto_mods.sort(
         key=lambda m: (

@@ -5,6 +5,17 @@ export DEBIAN_FRONTEND=noninteractive
 WORKER_DIR="/opt/EmulatorDroplet"
 ANDROID_SDK_ROOT="/opt/android-sdk"
 
+echo "[0/6] Ensuring 8GB swapfile is active..."
+if [ ! -f /swapfile ]; then
+  fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  if ! grep -q '/swapfile' /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
+fi
+
 echo "[1/6] Installing system packages & KVM dependencies..."
 apt-get update -y
 apt-get install -y \

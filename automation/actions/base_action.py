@@ -39,16 +39,55 @@ class BaseAction(ABC):
 
     def execute(self, controller: PhoneController, params: dict[str, Any]) -> ActionResult:
         """Validate start position, run the action, and return a structured ActionResult."""
+        controller.current_action_type = self.action_name
+        controller.log_event(
+            level="INFO",
+            event_type="ACTION_START",
+            message=f"Starting action {self.action_name}",
+            details={"params": params, "start_location": controller.location},
+        )
         try:
             self.prepare_start_position(controller, params)
-            return self.run(controller, params)
+            res = self.run(controller, params)
+            controller.log_event(
+                level="INFO" if res.error is None else "ERROR",
+                event_type="ACTION_COMPLETE" if res.error is None else "ACTION_FAILED",
+                message=f"Action {self.action_name} finished with status={res.status}",
+                details={"status": res.status, "error": res.error, "location": res.location},
+            )
+            return res
         except AutomationError as exc:
+            controller.log_event(
+                level="ERROR",
+                event_type="ACTION_ERROR",
+                message=f"{exc.code}: {exc.message}",
+                details={"code": exc.code, "message": exc.message, "location": controller.location},
+                xml_element=controller.last_xml,
+            )
+            if exc.code not in ("UNKNOWN_PAGE_TIMEOUT", "STUCK_ON_SAME_PAGE", "REPEATED_PAGE_ERROR", "GO_TO_MAIN_PAGE_FAILED"):
+                controller.record_unknown_page(
+                    reason=f"ACTION_ERROR:{exc.code}",
+                    expected_pages=self.action_name,
+                    xml_element=controller.last_xml,
+                )
             return ActionResult(
                 status=self.failure_status,
                 error=f"{exc.code}: {exc.message}",
                 location=controller.location,
             )
         except Exception as exc:
+            controller.log_event(
+                level="ERROR",
+                event_type="ACTION_EXCEPTION",
+                message=str(exc),
+                details={"exception": str(exc), "location": controller.location},
+                xml_element=controller.last_xml,
+            )
+            controller.record_unknown_page(
+                reason=f"ACTION_EXCEPTION:{type(exc).__name__}",
+                expected_pages=self.action_name,
+                xml_element=controller.last_xml,
+            )
             return ActionResult(
                 status=self.failure_status,
                 error=str(exc),

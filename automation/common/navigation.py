@@ -68,6 +68,12 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
         popup_handled = False
         for popup_page in COMMON_POPUP_PAGES:
             if popup_page.is_detected(xml):
+                controller.log_event(
+                    level="WARN",
+                    event_type="POPUP_HANDLED",
+                    message=f"Dismissing popup/overlay {popup_page.name} during go_to_main_page",
+                    page_name=popup_page.name,
+                )
                 popup_page.execute(controller, xml, {})
                 popup_handled = True
                 break
@@ -118,13 +124,20 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
         time.sleep(1.2)
 
     # Check once more before restarting app
+    last_xml = None
     try:
-        xml = controller.fetch_xml()
-        if is_on_main_page(xml):
+        last_xml = controller.fetch_xml()
+        if is_on_main_page(last_xml):
             controller.set_location(Location.MAIN_PAGE)
-            return xml
+            return last_xml
     except Exception:
         pass
+
+    controller.record_unknown_page(
+        reason="NAVIGATION_FALLBACK_RESTART",
+        expected_pages="MAIN_PAGE",
+        xml_element=last_xml,
+    )
 
     # Fallback: restart Snapchat and wait for MAIN_PAGE
     controller.restart_app(wait_seconds=3.5)
@@ -136,6 +149,12 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
             return xml
         for popup_page in COMMON_POPUP_PAGES:
             if popup_page.is_detected(xml):
+                controller.log_event(
+                    level="WARN",
+                    event_type="POPUP_HANDLED",
+                    message=f"Dismissing popup/overlay {popup_page.name} after restart",
+                    page_name=popup_page.name,
+                )
                 popup_page.execute(controller, xml, {})
                 break
         # If it opened on Chat tab or another bottom-nav tab, click Camera tab
@@ -144,4 +163,9 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
             controller.click_element(camera_tabs[0])
         time.sleep(1.2)
 
+    controller.record_unknown_page(
+        reason="GO_TO_MAIN_PAGE_FAILED",
+        expected_pages="MAIN_PAGE",
+        xml_element=controller.last_xml,
+    )
     raise AutomationError("GO_TO_MAIN_PAGE_FAILED", "Could not reach MAIN_PAGE even after restarting Snapchat")
