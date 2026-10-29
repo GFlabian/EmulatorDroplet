@@ -378,6 +378,29 @@ class EmulatorManager:
                     "ANDROID_HOME": str(self.sdk_root), "ANDROID_AVD_HOME": str(self.avd_home),
                     "PATH": str(self.adb_exe.parent) + os.pathsep + os.environ.get("PATH", "")}
         self._server_started = False
+        if not IS_WINDOWS:
+            self._enable_linux_host_memory_optimizations()
+
+    @staticmethod
+    def _enable_linux_host_memory_optimizations():
+        """Enable host-level KSM (Kernel Samepage Merging) and zswap on Linux workers.
+        Operates purely in the Linux host kernel with zero change to the Android guest.
+        """
+        tunables = (
+            ("/sys/kernel/mm/ksm/pages_to_scan", "4000"),
+            ("/sys/kernel/mm/ksm/sleep_millisecs", "20"),
+            ("/sys/kernel/mm/ksm/use_zero_pages", "1"),
+            ("/sys/kernel/mm/ksm/run", "1"),
+            ("/sys/module/zswap/parameters/max_pool_percent", "25"),
+            ("/sys/module/zswap/parameters/enabled", "Y"),
+        )
+        for sysfs_path, val in tunables:
+            try:
+                p = Path(sysfs_path)
+                if p.exists():
+                    p.write_text(val, encoding="utf-8")
+            except Exception:
+                pass
 
     # ---- profiles ------------------------------------------------------------
 
@@ -538,10 +561,8 @@ class EmulatorManager:
         width = width if width is not None else hw.get("width", 720)
         height = height if height is not None else hw.get("height", 1600)
         density = density if density is not None else hw.get("density", 280)
-        default_ram = 2048 if not IS_WINDOWS else 2560
-        default_cores = 2 if not IS_WINDOWS else 4
-        ram_mb = ram_mb if ram_mb is not None else hw.get("ram", default_ram)
-        cores = cores if cores is not None else hw.get("cores", default_cores)
+        ram_mb = ram_mb if ram_mb is not None else hw.get("ram", 2560)
+        cores = cores if cores is not None else hw.get("cores", 4)
         img = self._resolve_image(image)
         props_wanted = self._normalize_props({**(prof or {}).get("props", {}), **(props or {})})
         source = _read_props(img / "source.properties")

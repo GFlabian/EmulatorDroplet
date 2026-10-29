@@ -5,9 +5,9 @@ export DEBIAN_FRONTEND=noninteractive
 WORKER_DIR="/opt/EmulatorDroplet"
 ANDROID_SDK_ROOT="/opt/android-sdk"
 
-echo "[0/6] Ensuring 8GB swapfile is active..."
+echo "[0/6] Ensuring 32GB swapfile, KSM, and zswap are active..."
 if [ ! -f /swapfile ]; then
-  fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
+  fallocate -l 32G /swapfile || fallocate -l 16G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=16384
   chmod 600 /swapfile
   mkswap /swapfile
   swapon /swapfile
@@ -15,6 +15,13 @@ if [ ! -f /swapfile ]; then
     echo '/swapfile none swap sw 0 0' >> /etc/fstab
   fi
 fi
+sysctl -w vm.swappiness=20 >/dev/null 2>&1 || true
+echo 4000 > /sys/kernel/mm/ksm/pages_to_scan 2>/dev/null || true
+echo 20 > /sys/kernel/mm/ksm/sleep_millisecs 2>/dev/null || true
+echo 1 > /sys/kernel/mm/ksm/use_zero_pages 2>/dev/null || true
+echo 1 > /sys/kernel/mm/ksm/run 2>/dev/null || true
+echo 25 > /sys/module/zswap/parameters/max_pool_percent 2>/dev/null || true
+echo Y > /sys/module/zswap/parameters/enabled 2>/dev/null || true
 
 echo "[1/6] Installing system packages & KVM dependencies..."
 apt-get update -y
