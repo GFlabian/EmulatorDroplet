@@ -656,7 +656,9 @@ class EmulatorManager:
             script = "; ".join([f"pm uninstall --user 0 {p} >/dev/null 2>&1" for p in BLOAT] +
                                [f"settings put global {k} 0" for k in
                                 ("window_animation_scale", "transition_animation_scale", "animator_duration_scale")] +
-                               ["settings put secure stylus_handwriting_enabled 0"])
+                               ["settings put secure stylus_handwriting_enabled 0",
+                                "settings put global hide_error_dialogs 1",
+                                "settings put secure anr_show_background 0"])
             self._run_adb("-s", serial, "shell", script, timeout=120)
             self._save_state(name, slimmed=True)
             self._log(f"{name}: removed preinstalled apps, animations off")

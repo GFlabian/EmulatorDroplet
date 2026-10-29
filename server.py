@@ -562,15 +562,24 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
     except Exception as exc:
         git_output = f"git pull warning: {exc}"
 
-    # Hot-reload automation modules so running emulators get new action logic without restarting
+    # Hot-reload automation modules in dependency order (common -> actions -> package root)
     reloaded = []
-    for mod_name in sorted(list(sys.modules.keys())):
-        if mod_name == "automation" or mod_name.startswith("automation."):
-            try:
-                importlib.reload(sys.modules[mod_name])
-                reloaded.append(mod_name)
-            except Exception:
-                pass
+    auto_mods = [m for m in sys.modules.keys() if m == "automation" or m.startswith("automation.")]
+    auto_mods.sort(
+        key=lambda m: (
+            0 if "shared_rules" in m else
+            1 if m.startswith("automation.common") else
+            2 if m.startswith("automation.actions") else
+            3,
+            m,
+        )
+    )
+    for mod_name in auto_mods:
+        try:
+            importlib.reload(sys.modules[mod_name])
+            reloaded.append(mod_name)
+        except Exception:
+            pass
 
     if req and req.restart_service and platform.system().lower() == "linux":
         threading.Timer(1.0, lambda: subprocess.Popen(["systemctl", "restart", "freya-worker"])).start()

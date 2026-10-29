@@ -69,3 +69,12 @@ UpsellDismissPopupRule = XmlPageRule(
         "com.snapchat.android:id/okay_button",
     ]
 )
+
+# Android System ANR ("System UI isn't responding" / "... isn't responding") dialog
+SystemAnrDialogRule = XmlPageRule(
+    include_any=[
+        "android:id/aerr_wait",
+        "android:id/aerr_close",
+        "isn't responding",
+    ]
+)

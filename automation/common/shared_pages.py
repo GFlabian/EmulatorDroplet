@@ -6,9 +6,31 @@ from automation.common.models import Element
 from automation.common.phone_controller import PhoneController
 from automation.common.shared_rules import (
     AllowPermissionPopupRule,
+    SystemAnrDialogRule,
     UpsellDismissPopupRule,
 )
 from automation.common.xml_page import XmlPage
+
+
+class SystemAnrDialogPage(XmlPage):
+    """Automatically dismisses Android 'isn't responding' (ANR) dialogs and brings Snapchat to foreground."""
+
+    def __init__(self):
+        super().__init__(SystemAnrDialogRule)
+
+    def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        for rid in ("android:id/aerr_wait", "android:id/aerr_close"):
+            btns = xml.get_elements_by_id(rid)
+            if btns:
+                controller.click_element(btns[0])
+                controller.sleep(1.0)
+                controller.ensure_app_foreground()
+                return
+        wait_btns = xml.get_elements_by_text(["Wait", "Close app"])
+        if wait_btns:
+            controller.click_element(wait_btns[0])
+            controller.sleep(1.0)
+            controller.ensure_app_foreground()
 
 
 class AllowPermissionPopupPage(XmlPage):
@@ -48,6 +70,7 @@ class UpsellDismissPopupPage(XmlPage):
 
 
 COMMON_POPUP_PAGES: list[XmlPage] = [
+    SystemAnrDialogPage(),
     AllowPermissionPopupPage(),
     UpsellDismissPopupPage(),
 ]
