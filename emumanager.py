@@ -1171,8 +1171,16 @@ class EmulatorManager:
         raise EmulatorError(f"remount failed on {name}: {output}")
 
     def _reboot(self, name, timeout, on_status=None):
-        self.adb(name, "reboot", timeout=60)
-        self.adb(name, "wait-for-disconnect", timeout=120)
+        state = self._state(name)
+        try:
+            self.adb(name, "reboot", timeout=60)
+            self.adb(name, "wait-for-disconnect", timeout=120)
+        except Exception:
+            pass
+        time.sleep(2)
+        if not self.is_running(name):
+            self._log(f"{name}: process exited on reboot; starting back up")
+            self.start(name, headless=state.get("headless", True), writable_system=True, wait=False)
         self.wait_for_boot(name, timeout, slim=False, on_status=on_status)
 
     def _avd_dir(self, name):
