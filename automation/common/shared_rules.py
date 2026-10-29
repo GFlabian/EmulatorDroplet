@@ -78,3 +78,15 @@ SystemAnrDialogRule = XmlPageRule(
         "isn't responding",
     ]
 )
+
+# Android Home Screen Launcher (if Snapchat was backgrounded by System UI startup)
+AndroidLauncherRule = XmlPageRule(
+    include_any=[
+        "com.google.android.apps.nexuslauncher:id/workspace",
+        "com.google.android.apps.nexuslauncher:id/hotseat",
+        "com.android.launcher3:id/workspace",
+    ],
+    exclude=[
+        "com.snapchat.android:id/",
+    ],
+)

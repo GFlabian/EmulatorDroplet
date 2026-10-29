@@ -6,6 +6,7 @@ from automation.common.models import Element
 from automation.common.phone_controller import PhoneController
 from automation.common.shared_rules import (
     AllowPermissionPopupRule,
+    AndroidLauncherRule,
     SystemAnrDialogRule,
     UpsellDismissPopupRule,
 )
@@ -31,6 +32,17 @@ class SystemAnrDialogPage(XmlPage):
             controller.click_element(wait_btns[0])
             controller.sleep(1.0)
             controller.ensure_app_foreground()
+
+
+class AndroidLauncherRecoveryPage(XmlPage):
+    """Brings Snapchat back to the foreground if the device is sitting on the Android Home Launcher."""
+
+    def __init__(self):
+        super().__init__(AndroidLauncherRule)
+
+    def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        controller.report_status("Bringing Snapchat to foreground...")
+        controller.ensure_app_foreground()
 
 
 class AllowPermissionPopupPage(XmlPage):
@@ -71,6 +83,7 @@ class UpsellDismissPopupPage(XmlPage):
 
 COMMON_POPUP_PAGES: list[XmlPage] = [
     SystemAnrDialogPage(),
+    AndroidLauncherRecoveryPage(),
     AllowPermissionPopupPage(),
     UpsellDismissPopupPage(),
 ]

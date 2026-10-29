@@ -150,6 +150,14 @@ class PhoneController:
             cmds = "; ".join(f"input keyevent {int(key_code)}" for _ in range(times))
             self.shell(cmds, timeout=25)
 
+    def sleep(self, seconds: float):
+        time.sleep(seconds)
+
+    def ensure_app_foreground(self, package: str = SNAPCHAT_PACKAGE, wait_seconds: float = 3.0):
+        """Bring Snapchat to the foreground without force-stopping it."""
+        self.manager.start_app(self.avd_name, package)
+        time.sleep(wait_seconds)
+
     def restart_app(self, package: str = SNAPCHAT_PACKAGE, wait_seconds: float = 4.0):
         """Force-stop and relaunch Snapchat, resetting location to MAIN_PAGE."""
         self.report_status("Restarting Snapchat...")
