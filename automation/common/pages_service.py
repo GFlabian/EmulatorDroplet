@@ -1,0 +1,134 @@
+"""Page detection and execution loop service (modeled on FreyaAutomation PagesService)."""
+
+from __future__ import annotations
+
+import time
+from typing import Any, Optional
+
+from automation.common.models import AutomationError, Element
+from automation.common.phone_controller import PhoneController
+from automation.common.xml_page import XmlPage
+
+
+class PagesService:
+    """Polls UIAutomator XML, identifies the active XmlPage, executes it, and stops on final_pages."""
+
+    def __init__(
+        self,
+        pages: list[XmlPage],
+        final_pages: list[XmlPage],
+        timeout: int = 45,
+        execute_last_page: bool = False,
+        max_executions_same_page: int = 5,
+        poll_interval: float = 0.6,
+    ):
+        if not final_pages:
+            raise AutomationError("INVALID_PAGES", "final_pages cannot be empty")
+
+        self._final_pages: list[str] = [p.name for p in final_pages]
+        seen = set()
+        combined: list[XmlPage] = []
+        for p in list(pages) + list(final_pages):
+            if p.name not in seen:
+                seen.add(p.name)
+                combined.append(p)
+        self._pages: list[XmlPage] = combined
+        self._timeout = timeout
+        self._execute_last_page = execute_last_page
+        self._max_executions_same_page = max_executions_same_page
+        self._poll_interval = poll_interval
+        self._last_pages_history: list[str] = []
+        self._last_detected_page: Optional[XmlPage] = None
+
+    @property
+    def pages_history(self) -> list[str]:
+        return list(self._last_pages_history)
+
+    @property
+    def last_detected_page(self) -> Optional[XmlPage]:
+        return self._last_detected_page
+
+    def execute(
+        self,
+        controller: PhoneController,
+        context: Optional[dict[str, Any]] = None,
+    ) -> Element:
+        ctx = context if context is not None else {}
+        last_page_ts = time.monotonic()
+        local_history: list[str] = []
+        self._last_pages_history = local_history
+        self._last_detected_page = None
+
+        while True:
+            current_xml = controller.fetch_xml()
+            detected_page = self._detect_current_page(
+                current_xml, last_page_ts, local_history
+            )
+
+            if detected_page is None:
+                time.sleep(self._poll_interval)
+                continue
+
+            self._last_detected_page = detected_page
+
+            if detected_page.name in self._final_pages and not self._execute_last_page:
+                return current_xml
+
+            try:
+                detected_page.execute(controller, current_xml, ctx)
+            finally:
+                last_page_ts = time.monotonic()
+
+            if detected_page.name in self._final_pages:
+                return current_xml
+
+            time.sleep(self._poll_interval)
+
+    def _detect_current_page(
+        self,
+        current_xml: Optional[Element],
+        last_page_ts: float,
+        pages_history: list[str],
+    ) -> Optional[XmlPage]:
+        detected_pages: list[XmlPage] = [
+            p for p in self._pages if current_xml is not None and p.is_detected(current_xml)
+        ]
+
+        # Prioritize final pages if detected
+        for p in detected_pages:
+            if p.name in self._final_pages:
+                pages_history.append(p.name)
+                return p
+
+        detected_page: Optional[XmlPage] = None
+        for p in detected_pages:
+            if len(pages_history) == 0 or pages_history[-1] != p.name:
+                pages_history.append(p.name)
+                detected_page = p
+                break
+
+        if detected_page is not None:
+            for page_name in set(pages_history):
+                if pages_history.count(page_name) > self._max_executions_same_page:
+                    raise AutomationError(
+                        "REPEATED_PAGE_ERROR",
+                        f"Page {detected_page.name} executed more than {self._max_executions_same_page} times",
+                    )
+            return detected_page
+
+        if time.monotonic() - last_page_ts > self._timeout:
+            if len(detected_pages) == 0:
+                raise AutomationError(
+                    "UNKNOWN_PAGE_TIMEOUT",
+                    f"Timed out after {self._timeout}s on an unrecognized screen",
+                )
+            stuck_page = detected_pages[0]
+            # Allow one re-execution if stuck on a recognized non-final page before failing
+            if pages_history.count(stuck_page.name) < self._max_executions_same_page:
+                pages_history.append(stuck_page.name)
+                return stuck_page
+            raise AutomationError(
+                "STUCK_ON_SAME_PAGE",
+                f"Stuck on page {stuck_page.name} for over {self._timeout}s",
+            )
+        return None
