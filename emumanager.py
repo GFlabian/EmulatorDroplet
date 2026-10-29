@@ -606,7 +606,7 @@ class EmulatorManager:
             args = [str(self.emulator_exe), "-avd", name, "-port", str(port), "-no-boot-anim", "-no-audio",
                     "-no-snapshot", "-feature", "-QuickbootFileBacked"]
             if not IS_WINDOWS:
-                args += ["-gpu", "swiftshader_indirect"]
+                args += ["-gpu", "swiftshader_indirect", "-feature", "-WiFiPacketStream"]
             if headless or not IS_WINDOWS:
                 args.append("-no-window")
             if writable_system:
@@ -619,9 +619,11 @@ class EmulatorManager:
                 popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 popen_kwargs["start_new_session"] = True
-            proc = subprocess.Popen(args, env=self.env, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                    **popen_kwargs)
+            log_path = self._avd_dir(name) / "emulator.log"
+            with open(log_path, "ab") as log_f:
+                proc = subprocess.Popen(args, env=self.env, stdin=subprocess.DEVNULL,
+                                        stdout=log_f, stderr=log_f,
+                                        **popen_kwargs)
             self._save_state(name, pid=proc.pid, port=port, headless=headless)
         self._log(f"{name}: starting on emulator-{port}")
         if wait:
