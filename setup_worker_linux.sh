@@ -2,7 +2,7 @@
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
-WORKER_DIR="/opt/FreyaEmulator"
+WORKER_DIR="/opt/EmulatorDroplet"
 ANDROID_SDK_ROOT="/opt/android-sdk"
 
 echo "[1/6] Installing system packages & KVM dependencies..."
