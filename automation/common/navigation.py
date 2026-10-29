@@ -42,7 +42,11 @@ def detect_location_from_xml(xml: Element, fallback: str = Location.UNKNOWN) -> 
             return Location.REEL_COMMENTS_PAGE
     if "com.snapchat.android:id/ngs_chat_icon_container" in raw and "Chat" in raw and "My AI" in raw:
         return Location.CHATS_PAGE
-    if "com.snapchat.android:id/ngs_spotlight_icon_container" in raw and "com.snapchat.android:id/camera_page" not in raw:
+    if (
+        "com.snapchat.android:id/ngs_spotlight_icon_container" in raw
+        and "com.snapchat.android:id/camera_page" not in raw
+        and "com.snapchat.android:id/camera_capture_button" not in raw
+    ):
         return Location.REELS_PAGE
     return fallback
 

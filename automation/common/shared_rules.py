@@ -5,9 +5,13 @@ from automation.common.page_rule import XmlPageRule
 # Main Camera Screen (MAIN_PAGE)
 MainCameraPageRule = XmlPageRule(
     include=[
-        "com.snapchat.android:id/camera_page",
         "com.snapchat.android:id/ngs_camera_icon_container",
         "com.snapchat.android:id/hova_header_search_icon",
+    ],
+    include_any=[
+        "com.snapchat.android:id/camera_page",
+        "com.snapchat.android:id/camera_capture_button",
+        "com.snapchat.android:id/ngs_memories_icon",
     ],
     exclude=[
         "search-textfield",
