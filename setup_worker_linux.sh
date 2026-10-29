@@ -30,13 +30,17 @@ export ANDROID_HOME="${ANDROID_SDK_ROOT}"
 export EMU_SDK_ROOT="${ANDROID_SDK_ROOT}"
 export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/emulator:${PATH}"
 
-echo "[3/6] Accepting licenses and installing platform-tools, emulator, and Android 16 (36.1) system image..."
+echo "[3/6] Accepting licenses and installing platform-tools, emulator, and Android 14/15/16 system images..."
 yes | sdkmanager --licenses > /dev/null || true
 sdkmanager --install \
   "platform-tools" \
   "emulator" \
   "platforms;android-36" \
-  "system-images;android-36.1;google_apis;x86_64"
+  "platforms;android-35" \
+  "platforms;android-34" \
+  "system-images;android-36.1;google_apis;x86_64" \
+  "system-images;android-35;google_apis;x86_64" \
+  "system-images;android-34;google_apis;x86_64"
 
 echo "[4/6] Setting up Python virtual environment in ${WORKER_DIR}..."
 cd "${WORKER_DIR}"
