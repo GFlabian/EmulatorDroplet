@@ -36,9 +36,11 @@ class PhoneController:
         on_status: Optional[Callable[[str], None]] = None,
         on_location: Optional[Callable[[str], None]] = None,
         initial_location: str = Location.MAIN_PAGE,
+        username: str = "",
     ):
         self.manager = manager
         self.avd_name = avd_name
+        self.username = username
         self._on_status = on_status
         self._on_location = on_location
         self._location = initial_location

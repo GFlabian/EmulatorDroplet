@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -55,6 +55,19 @@ class CreateEmulatorRequest(BaseModel):
 class ShellCommandRequest(BaseModel):
     command: str = Field(..., min_length=1, description="adb shell command to execute")
     timeout: int = Field(default=60, ge=1, le=600, description="Timeout in seconds")
+
+
+class DeviceInputRequest(BaseModel):
+    type: str = Field(..., description="Input type: tap, swipe, text, key, or restart_app")
+    x: Optional[int] = Field(default=None, description="X coordinate (0..1080) for tap")
+    y: Optional[int] = Field(default=None, description="Y coordinate (0..2400) for tap")
+    x1: Optional[int] = Field(default=None, description="Start X coordinate for swipe")
+    y1: Optional[int] = Field(default=None, description="Start Y coordinate for swipe")
+    x2: Optional[int] = Field(default=None, description="End X coordinate for swipe")
+    y2: Optional[int] = Field(default=None, description="End Y coordinate for swipe")
+    duration_ms: int = Field(default=300, ge=50, le=5000, description="Swipe duration in ms")
+    text: Optional[str] = Field(default=None, description="Text string to type")
+    keycode: Optional[int] = Field(default=None, description="Android keycode (e.g. 4=BACK, 3=HOME, 187=RECENTS, 66=ENTER, 67=BACKSPACE)")
 
 
 class ExecuteActionRequest(BaseModel):
@@ -205,10 +218,12 @@ class EmulatorRegistry:
                     on_status=lambda st: self._set_status(emu_id, st),
                     on_location=lambda loc: self._set_location(emu_id, loc),
                     initial_location=rec.get("location") or Location.MAIN_PAGE,
+                    username=rec.get("username") or "",
                 )
                 self._controllers[emu_id] = ctrl
             else:
                 ctrl._location = rec.get("location") or ctrl.location
+                ctrl.username = rec.get("username") or ctrl.username
             return ctrl
 
     def _run_create(self, emu_id: str):
@@ -673,6 +688,76 @@ def delete_emulator_post(emu_id: str):
 @app.post("/api/emulators/{emu_id}/shell")
 def run_shell_command(emu_id: str, req: ShellCommandRequest):
     return registry.run_shell(emu_id, req.command, timeout=req.timeout)
+
+
+@app.get("/api/emulators/{emu_id}/screenshot")
+def get_emulator_screenshot(emu_id: str):
+    rec = registry.get(emu_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"No emulator with id {emu_id!r}")
+    if rec["deleted"]:
+        raise HTTPException(status_code=409, detail=f"Emulator {emu_id} is deleted")
+    try:
+        png_bytes = emu_manager.screenshot_bytes(rec["name"], timeout=12)
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
+    except EmulatorError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Screenshot failed: {exc}")
+
+
+@app.post("/api/emulators/{emu_id}/input")
+def send_emulator_input(emu_id: str, req: DeviceInputRequest):
+    rec = registry.get(emu_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"No emulator with id {emu_id!r}")
+    if rec["deleted"]:
+        raise HTTPException(status_code=409, detail=f"Emulator {emu_id} is deleted")
+
+    avd_name = rec["name"]
+    kind = (req.type or "").strip().lower()
+    try:
+        if kind == "tap":
+            if req.x is None or req.y is None:
+                raise HTTPException(status_code=400, detail="tap requires x and y")
+            emu_manager.adb(avd_name, "shell", f"input tap {int(req.x)} {int(req.y)}", timeout=15)
+            return {"ok": True, "type": "tap", "x": int(req.x), "y": int(req.y)}
+        elif kind == "swipe":
+            if None in (req.x1, req.y1, req.x2, req.y2):
+                raise HTTPException(status_code=400, detail="swipe requires x1, y1, x2, y2")
+            dur = max(50, min(5000, int(req.duration_ms or 300)))
+            emu_manager.adb(
+                avd_name,
+                "shell",
+                f"input swipe {int(req.x1)} {int(req.y1)} {int(req.x2)} {int(req.y2)} {dur}",
+                timeout=15,
+            )
+            return {"ok": True, "type": "swipe", "x1": int(req.x1), "y1": int(req.y1), "x2": int(req.x2), "y2": int(req.y2), "duration_ms": dur}
+        elif kind == "key":
+            if req.keycode is None:
+                raise HTTPException(status_code=400, detail="key requires keycode")
+            emu_manager.adb(avd_name, "shell", f"input keyevent {int(req.keycode)}", timeout=15)
+            return {"ok": True, "type": "key", "keycode": int(req.keycode)}
+        elif kind == "text":
+            if not req.text:
+                raise HTTPException(status_code=400, detail="text requires non-empty text")
+            ctrl = registry._get_or_create_controller(emu_id)
+            ctrl.keyboard(req.text)
+            return {"ok": True, "type": "text", "text": req.text}
+        elif kind == "restart_app":
+            ctrl = registry._get_or_create_controller(emu_id)
+            ctrl.restart_app(wait_seconds=2.5)
+            return {"ok": True, "type": "restart_app", "location": Location.MAIN_PAGE}
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported input type {req.type!r}. Use tap, swipe, key, text, or restart_app.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Input failed: {exc}")
 
 
 @app.post("/api/emulators/{emu_id}/actions", status_code=202)

@@ -7,6 +7,7 @@ from automation.actions.base_action import BaseAction
 from automation.actions.fetch_friends.action import FetchFriendsAction
 from automation.actions.send_message.action import SendMessageAction
 from automation.actions.send_message_to_ai.action import SendMessageToAiAction
+from automation.actions.update_session.action import UpdateSessionAction
 from automation.actions.watch_comments_reel.action import WatchCommentsReelAction
 from automation.actions.watch_reels.action import WatchReelsAction
 from automation.common.models import AutomationError
@@ -20,6 +21,7 @@ ACTION_REGISTRY: dict[str, Type[BaseAction]] = {
     "SEND_MESSAGE_TO_AI": SendMessageToAiAction,
     "FETCH_FRIENDS": FetchFriendsAction,
     "SEND_MESSAGE": SendMessageAction,
+    "UPDATE_SESSION": UpdateSessionAction,
 }
 
 
@@ -108,6 +110,17 @@ def list_supported_actions() -> list[dict]:
             "success_status": SendMessageAction.success_status,
             "failure_status": SendMessageAction.failure_status,
         },
+        {
+            "name": "UPDATE_SESSION",
+            "aliases": [],
+            "description": "Extract /data/data/com.snapchat.android from the emulator, compress it as .7z, and upload it to DigitalOcean Spaces in place of the existing session.",
+            "allowed_start_locations": list(UpdateSessionAction.allowed_start_locations),
+            "params": [
+                {"name": "username", "type": "string", "required": False, "placeholder": "Optional override (defaults to emulator's username)"},
+            ],
+            "success_status": UpdateSessionAction.success_status,
+            "failure_status": UpdateSessionAction.failure_status,
+        },
     ]
 
 
@@ -118,6 +131,7 @@ __all__ = [
     "FetchFriendsAction",
     "SendMessageAction",
     "SendMessageToAiAction",
+    "UpdateSessionAction",
     "WatchCommentsReelAction",
     "WatchReelsAction",
     "get_action",

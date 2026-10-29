@@ -901,6 +901,105 @@ class EmulatorManager:
             raise EmulatorError(f"loading Snapchat session on {name} failed: {out}")
         self._log(f"{name}: loaded Snapchat session for {username!r}")
 
+    def save_snapchat_session(self, name, username, timeout=300, on_status=None):
+        """Extract /data/data/com.snapchat.android from emulator, compress as .7z, and upload to DigitalOcean Spaces."""
+        session_name = username.strip().lower()
+        if not session_name:
+            raise EmulatorError("username cannot be empty")
+        if on_status is not None:
+            on_status(f"Archiving /data/data/{SNAPCHAT_PACKAGE} on device...")
+        self._root(name)
+        remote_tar = f"/data/local/tmp/{session_name}_out.tar"
+        tar_script = (
+            f"if [ ! -d /data/data/{SNAPCHAT_PACKAGE} ]; then echo MISSING_DIR; exit 1; fi; "
+            f"am force-stop {SNAPCHAT_PACKAGE}; sync; "
+            f"rm -f {remote_tar}; "
+            f"tar -cf {remote_tar} -C /data/data "
+            f"--exclude='{SNAPCHAT_PACKAGE}/lib' "
+            f"--exclude='{SNAPCHAT_PACKAGE}/code_cache' "
+            f"{SNAPCHAT_PACKAGE} && echo TAR_OK"
+        )
+        tar_out = self.adb(name, "shell", tar_script, timeout=timeout)
+        if "TAR_OK" not in tar_out:
+            raise EmulatorError(f"archiving {SNAPCHAT_PACKAGE} on {name} failed: {tar_out}")
+
+        key = f"{DO_SPACES_PREFIX.strip('/')}/{SNAPCHAT_PACKAGE}/{session_name}.7z"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            local_tar = tmp / f"{session_name}_out.tar"
+            if on_status is not None:
+                on_status("Pulling session archive from emulator...")
+            pull_out = self.adb(name, "pull", remote_tar, str(local_tar), timeout=timeout)
+            self.adb(name, "shell", f"rm -f {remote_tar}", timeout=30)
+            # Relaunch Snapchat immediately so the phone returns to MAIN_PAGE while we compress & upload
+            try:
+                self.start_app(name, SNAPCHAT_PACKAGE)
+            except Exception:
+                pass
+            if not local_tar.is_file() or local_tar.stat().st_size == 0:
+                raise EmulatorError(f"pulling session tar from {name} failed: {pull_out}")
+
+            if on_status is not None:
+                on_status(f"Compressing {session_name}.7z...")
+            extract_dir = tmp / "extracted"
+            extract_dir.mkdir()
+            with tarfile.open(local_tar, "r") as tf:
+                for member in tf.getmembers():
+                    if member.isfile() or member.isdir():
+                        try:
+                            tf.extract(member, path=extract_dir, set_attrs=False)
+                        except TypeError:
+                            tf.extract(member, path=extract_dir)
+                        except Exception:
+                            pass
+
+            pkg_dir = extract_dir / SNAPCHAT_PACKAGE
+            if not pkg_dir.is_dir():
+                raise EmulatorError(f"extracted tar from {name} is missing {SNAPCHAT_PACKAGE}/ directory")
+
+            archive_path = tmp / f"{session_name}.7z"
+            with py7zr.SevenZipFile(archive_path, "w") as zf:
+                zf.writeall(pkg_dir, arcname=SNAPCHAT_PACKAGE)
+
+            archive_size = archive_path.stat().st_size
+            if on_status is not None:
+                on_status(f"Uploading {key} ({archive_size // 1024} KB) to DigitalOcean Spaces...")
+            try:
+                s3 = boto3.client(
+                    "s3", region_name=DO_SPACES_REGION, endpoint_url=DO_SPACES_ENDPOINT,
+                    aws_access_key_id=DO_SPACES_ACCESS_KEY, aws_secret_access_key=DO_SPACES_SECRET_KEY,
+                    config=Config(signature_version="s3v4", retries={"max_attempts": 5, "mode": "standard"}),
+                )
+                s3.upload_file(str(archive_path), DO_SPACES_BUCKET, key)
+            except Exception as e:
+                raise EmulatorError(f"uploading Snapchat session {key} failed: {e}") from e
+
+        self._log(f"{name}: saved & uploaded Snapchat session for {username!r} ({archive_size} bytes)")
+        return {
+            "username": session_name,
+            "bucket": DO_SPACES_BUCKET,
+            "key": key,
+            "size_bytes": archive_size,
+        }
+
+    def screenshot_bytes(self, name, timeout=15) -> bytes:
+        """Capture the current screen of a running emulator as raw PNG bytes."""
+        serial = self._serial_or_raise(name)
+        with self._lock:
+            if not self._server_started:
+                subprocess.run([str(self.adb_exe), "start-server"], env=self.env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                self._server_started = True
+        res = subprocess.run(
+            [str(self.adb_exe), "-s", serial, "exec-out", "screencap", "-p"],
+            env=self.env,
+            capture_output=True,
+            timeout=timeout,
+        )
+        if res.returncode != 0 or not res.stdout.startswith(b"\x89PNG"):
+            raise EmulatorError(f"screencap failed on {name}")
+        return res.stdout
+
     def get_props(self, name, keys=None):
         """Current values of system properties (default: the PROP_ALIASES ones)."""
         keys = [PROP_ALIASES.get(k, k) for k in (keys or PROP_ALIASES.values())]
