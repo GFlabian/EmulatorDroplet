@@ -874,23 +874,23 @@ class EmulatorManager:
             with tarfile.open(tar_path, "w") as tar:
                 for item in extract_dir.iterdir():
                     tar.add(item, arcname=item.name)
-            self.adb(name, "shell", f"am force-stop {SNAPCHAT_PACKAGE}; rm -rf /sdcard/{session_name} /sdcard/{session_name}.tar",
+            self.adb(name, "shell", f"am force-stop {SNAPCHAT_PACKAGE}; rm -rf /data/local/tmp/{session_name} /data/local/tmp/{session_name}.tar",
                      timeout=60)
-            push_out = self.adb(name, "push", str(tar_path), f"/sdcard/{session_name}.tar", timeout=timeout)
+            push_out = self.adb(name, "push", str(tar_path), f"/data/local/tmp/{session_name}.tar", timeout=timeout)
             if "error:" in push_out.lower():
                 raise EmulatorError(f"pushing session to {name} failed: {push_out}")
         script = (
-            f"mkdir -p /sdcard/{session_name} && "
-            f"tar -xf /sdcard/{session_name}.tar -C /sdcard/{session_name} && "
+            f"mkdir -p /data/local/tmp/{session_name} && "
+            f"tar -xf /data/local/tmp/{session_name}.tar -C /data/local/tmp/{session_name} && "
             f"rm -rf /data/data/{SNAPCHAT_PACKAGE} && "
-            f"if [ -d /sdcard/{session_name}/{SNAPCHAT_PACKAGE}/{SNAPCHAT_PACKAGE} ]; then "
-            f"mv /sdcard/{session_name}/{SNAPCHAT_PACKAGE}/{SNAPCHAT_PACKAGE} /data/data/; "
-            f"elif [ -d /sdcard/{session_name}/{SNAPCHAT_PACKAGE} ]; then "
-            f"mv /sdcard/{session_name}/{SNAPCHAT_PACKAGE} /data/data/; "
-            f"else mv /sdcard/{session_name} /data/data/{SNAPCHAT_PACKAGE}; fi && "
+            f"if [ -d /data/local/tmp/{session_name}/{SNAPCHAT_PACKAGE}/{SNAPCHAT_PACKAGE} ]; then "
+            f"mv /data/local/tmp/{session_name}/{SNAPCHAT_PACKAGE}/{SNAPCHAT_PACKAGE} /data/data/; "
+            f"elif [ -d /data/local/tmp/{session_name}/{SNAPCHAT_PACKAGE} ]; then "
+            f"mv /data/local/tmp/{session_name}/{SNAPCHAT_PACKAGE} /data/data/; "
+            f"else mv /data/local/tmp/{session_name} /data/data/{SNAPCHAT_PACKAGE}; fi && "
             f"chown -R {user}:{group} /data/data/{SNAPCHAT_PACKAGE} && "
             f"chcon -R {context} /data/data/{SNAPCHAT_PACKAGE} && "
-            f"rm -rf /sdcard/{session_name} /sdcard/{session_name}.tar && echo OK"
+            f"rm -rf /data/local/tmp/{session_name} /data/local/tmp/{session_name}.tar && echo OK"
         )
         out = self.adb(name, "shell", script, timeout=timeout)
         if not out.endswith("OK"):
