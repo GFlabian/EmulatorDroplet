@@ -62,7 +62,7 @@ class SystemAnrDialogPage(XmlPage):
             if close_btns:
                 controller.click_element(close_btns[0])
                 controller.sleep(1.0)
-            controller.restart_app(wait_seconds=6.0)
+            controller.restart_app(wait_seconds=12.0)
             return
 
         wait_btns = xml.get_elements_by_id("android:id/aerr_wait")

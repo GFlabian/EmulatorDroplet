@@ -252,11 +252,11 @@ class PhoneController:
         except Exception:
             pass
 
-    def restart_app(self, package: str = SNAPCHAT_PACKAGE, wait_seconds: float = 4.0):
+    def restart_app(self, package: str = SNAPCHAT_PACKAGE, wait_seconds: float = 10.0):
         """Force-stop and relaunch Snapchat, resetting location to MAIN_PAGE."""
         self.report_status("Restarting Snapchat...")
         self.shell(f"am force-stop {package}", timeout=20)
-        time.sleep(0.6)
+        time.sleep(1.0)
         self.manager.start_app(self.avd_name, package)
         time.sleep(wait_seconds)
         self.set_location(Location.MAIN_PAGE)

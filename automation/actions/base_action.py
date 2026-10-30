@@ -48,7 +48,7 @@ class BaseAction(ABC):
         )
         try:
             if self.action_name != "UPDATE_SESSION":
-                controller.ensure_app_foreground(wait_seconds=2.5)
+                controller.ensure_app_foreground(wait_seconds=5.0)
             self.prepare_start_position(controller, params)
             res = self.run(controller, params)
             controller.log_event(
