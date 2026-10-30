@@ -771,6 +771,11 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
 
     # Rebind top-level symbols and clear cached PhoneController instances so new methods take effect immediately
     global PhoneController, get_action, list_supported_actions, Location, AutomationError, ActionRecord
+    if "emumanager" in sys.modules:
+        try:
+            emu_manager.__class__ = sys.modules["emumanager"].EmulatorManager
+        except Exception:
+            pass
     if "automation" in sys.modules:
         auto_pkg = sys.modules["automation"]
         PhoneController = getattr(auto_pkg, "PhoneController", PhoneController)

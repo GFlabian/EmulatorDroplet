@@ -1010,8 +1010,95 @@ class EmulatorManager:
             "size_bytes": archive_size,
         }
 
+    @staticmethod
+    def _console_read_until_ok(sock: socket.socket) -> bytes:
+        buf = b""
+        while not buf.endswith(b"OK\r\n") and not buf.endswith(b"OK\n") and b"KO:" not in buf:
+            chunk = sock.recv(1024)
+            if not chunk:
+                break
+            buf += chunk
+        return buf
+
+    def _get_console_socket(self, name: str, port: int, timeout: float = 5.0) -> socket.socket:
+        sockets = getattr(self, "_console_sockets", None)
+        if sockets is None:
+            sockets = {}
+            self._console_sockets = sockets
+        existing = sockets.get(name)
+        if existing is not None and existing[0] == port:
+            return existing[1]
+        if existing is not None:
+            try:
+                existing[1].close()
+            except Exception:
+                pass
+            sockets.pop(name, None)
+
+        sock = socket.create_connection(("127.0.0.1", int(port)), timeout=timeout)
+        banner = self._console_read_until_ok(sock)
+        if b"Authentication required" in banner or b"auth" in banner:
+            token_file = Path.home() / ".emulator_console_auth_token"
+            token = token_file.read_text(encoding="utf-8").strip() if token_file.is_file() else ""
+            sock.sendall(f"auth {token}\r\n".encode("utf-8"))
+            auth_resp = self._console_read_until_ok(sock)
+            if b"KO:" in auth_resp:
+                sock.close()
+                raise EmulatorError(f"console auth failed on {name} (port {port})")
+        sockets[name] = (port, sock)
+        return sock
+
+    def _screenshot_via_console(self, name: str, port: int, timeout: float = 5.0) -> bytes | None:
+        locks = getattr(self, "_console_locks", None)
+        if locks is None:
+            with self._lock:
+                locks = getattr(self, "_console_locks", None)
+                if locks is None:
+                    locks = {}
+                    self._console_locks = locks
+        with self._lock:
+            emu_lock = locks.setdefault(name, threading.Lock())
+
+        shm_dir = Path("/dev/shm") if (not IS_WINDOWS and Path("/dev/shm").is_dir()) else Path(tempfile.gettempdir())
+        shot_path = shm_dir / f"freya_shot_{port}.png"
+        cmd = f"screenrecord screenshot {shot_path.as_posix()}\r\n".encode("utf-8")
+
+        with emu_lock:
+            for attempt in range(2):
+                try:
+                    sock = self._get_console_socket(name, port, timeout=min(timeout, 4.0))
+                    sock.settimeout(min(timeout, 5.0))
+                    sock.sendall(cmd)
+                    resp = self._console_read_until_ok(sock)
+                    if b"OK" in resp and b"KO:" not in resp and shot_path.is_file():
+                        data = shot_path.read_bytes()
+                        if data.startswith(b"\x89PNG"):
+                            return data
+                    raise EmulatorError("console screenshot did not produce valid PNG")
+                except Exception:
+                    sockets = getattr(self, "_console_sockets", None)
+                    if sockets and name in sockets:
+                        try:
+                            sockets[name][1].close()
+                        except Exception:
+                            pass
+                        sockets.pop(name, None)
+                    if attempt == 1:
+                        return None
+        return None
+
     def screenshot_bytes(self, name, timeout=15) -> bytes:
-        """Capture the current screen of a running emulator as raw PNG bytes."""
+        """Capture the current screen of a running emulator as raw PNG bytes.
+        Uses the host-side QEMU console ('screenrecord screenshot') into /dev/shm (~300ms,
+        zero guest CPU/RAM overhead) with automatic fallback to 'adb exec-out screencap -p'.
+        """
+        state = self._state(name)
+        port = state.get("port")
+        if port:
+            fast_png = self._screenshot_via_console(name, int(port), timeout=timeout)
+            if fast_png:
+                return fast_png
+
         serial = self._serial_or_raise(name)
         with self._lock:
             if not self._server_started:
@@ -1404,6 +1491,15 @@ def _cli_props(args):
             raise EmulatorError(f"--set needs KEY=VALUE, got {item!r}")
         changes[key] = value
     return changes
+
+
+for _mod_name in ("__main__", "server"):
+    _mod = sys.modules.get(_mod_name)
+    if _mod is not None and hasattr(_mod, "emu_manager"):
+        try:
+            _mod.emu_manager.__class__ = EmulatorManager
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
