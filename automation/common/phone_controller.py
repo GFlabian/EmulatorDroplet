@@ -27,8 +27,8 @@ class PhoneController:
     _DUMP_OK_SIGNATURE = "UI hierchary dumped to"
     _DUMP_AND_READ_CMD = (
         "rm -f /data/local/tmp/uidump.xml; "
-        "(timeout 8 uiautomator dump --compressed /data/local/tmp/uidump.xml || "
-        "timeout 8 uiautomator dump /data/local/tmp/uidump.xml) && "
+        "(timeout 12 uiautomator dump --compressed /data/local/tmp/uidump.xml || "
+        "timeout 12 uiautomator dump /data/local/tmp/uidump.xml) && "
         "cat /data/local/tmp/uidump.xml"
     )
 
@@ -154,7 +154,13 @@ class PhoneController:
                     xml_str = self._extract_xml(out)
 
                 if xml_str is None:
-                    if self._NULL_ROOT_SIGNATURE in out or "ERROR: could not get idle state" in out:
+                    if (
+                        not out.strip()
+                        or self._NULL_ROOT_SIGNATURE in out
+                        or "ERROR: could not get idle state" in out
+                        or "Killed" in out
+                        or "Terminated" in out
+                    ):
                         if attempt < max_retries:
                             time.sleep(initial_delay)
                             continue
