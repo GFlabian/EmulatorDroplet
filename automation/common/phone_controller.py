@@ -141,10 +141,17 @@ class PhoneController:
     def shell(self, command: str, timeout: int = 45) -> str:
         return self.manager.adb(self.avd_name, "shell", command, timeout=timeout)
 
-    def fetch_xml(self, max_retries: int = 3, initial_delay: float = 0.7) -> Element:
+    def fetch_xml(
+        self,
+        max_retries: int = 3,
+        initial_delay: float = 0.7,
+        auto_dismiss_anr: bool = True,
+    ) -> Element:
         """Dump and parse UIAutomator XML hierarchy from the device."""
         last_err: Optional[Exception] = None
-        for attempt in range(max_retries + 1):
+        anr_dismissals = 0
+        attempt = 0
+        while attempt <= max_retries:
             try:
                 out = self.shell(self._DUMP_AND_READ_CMD, timeout=18)
                 xml_str = self._extract_xml(out)
@@ -158,6 +165,7 @@ class PhoneController:
                         or "Terminated" in out
                     ):
                         if attempt < max_retries:
+                            attempt += 1
                             time.sleep(initial_delay)
                             continue
                         return self.empty_element()
@@ -165,13 +173,29 @@ class PhoneController:
 
                 root = ET.fromstring(xml_str)
                 elem = Element(root)
+                if auto_dismiss_anr and anr_dismissals < 3:
+                    wait_btns = elem.get_elements_by_id("android:id/aerr_wait")
+                    if not wait_btns and "isn't responding" in xml_str.lower():
+                        wait_btns = elem.get_elements_by_text("Wait")
+                    if wait_btns:
+                        anr_dismissals += 1
+                        self.log_event(
+                            level="WARN",
+                            event_type="ANR_AUTO_WAIT",
+                            message=f"Auto-clicking 'Wait' on ANR dialog ({anr_dismissals}/3)",
+                        )
+                        self.click_element(wait_btns[0])
+                        time.sleep(2.5)
+                        continue
                 self.last_xml = elem
                 return elem
             except Exception as exc:
                 last_err = exc
                 if attempt < max_retries:
                     time.sleep(initial_delay * (1.5 ** attempt))
+                    attempt += 1
                     continue
+                break
         if isinstance(last_err, AutomationError):
             raise last_err
         raise AutomationError("XML_FETCH_FAILED", f"Failed to fetch XML: {last_err}")
