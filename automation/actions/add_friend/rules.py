@@ -125,7 +125,7 @@ def make_profile_sheet_dismiss_rule(target_username: str) -> XmlPageRule:
             return False
         return True
 
-    return XmlPageRule(any_of=_PROFILE_SHEET_IDS, predicate=_pred)
+    return XmlPageRule(include_any=_PROFILE_SHEET_IDS, predicate=_pred)
 
 
 def make_profile_sheet_add_final_rule(target_username: str) -> XmlPageRule:
@@ -135,7 +135,7 @@ def make_profile_sheet_add_final_rule(target_username: str) -> XmlPageRule:
         unames = xml.get_elements_by_id("profile_identity_section_username")
         return bool(unames and unames[0].text.strip().lower() == target)
 
-    return XmlPageRule(any_of=_PROFILE_SHEET_IDS, predicate=_pred)
+    return XmlPageRule(include_any=_PROFILE_SHEET_IDS, predicate=_pred)
 
 
 __all__ = [
