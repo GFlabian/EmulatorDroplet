@@ -109,8 +109,39 @@ def make_user_added_final_rule(target_username: str) -> XmlPageRule:
     return XmlPageRule(include=["search-textfield"], predicate=_pred)
 
 
+_PROFILE_SHEET_IDS = [
+    "ProfileFlatlandFriendOrGroupProfileHeaderUnifiedView",
+    "unified_profile_dismiss_button",
+    "non_friend_profile_action/non_friend_action_button_single",
+]
+
+
+def make_profile_sheet_dismiss_rule(target_username: str) -> XmlPageRule:
+    target = target_username.strip().lower()
+
+    def _pred(xml: Element) -> bool:
+        unames = xml.get_elements_by_id("profile_identity_section_username")
+        if unames and unames[0].text.strip().lower() == target:
+            return False
+        return True
+
+    return XmlPageRule(any_of=_PROFILE_SHEET_IDS, predicate=_pred)
+
+
+def make_profile_sheet_add_final_rule(target_username: str) -> XmlPageRule:
+    target = target_username.strip().lower()
+
+    def _pred(xml: Element) -> bool:
+        unames = xml.get_elements_by_id("profile_identity_section_username")
+        return bool(unames and unames[0].text.strip().lower() == target)
+
+    return XmlPageRule(any_of=_PROFILE_SHEET_IDS, predicate=_pred)
+
+
 __all__ = [
     "MainCameraPageRule",
+    "make_profile_sheet_add_final_rule",
+    "make_profile_sheet_dismiss_rule",
     "make_search_empty_rule",
     "make_search_has_add_button_rule",
     "make_search_needs_clear_rule",

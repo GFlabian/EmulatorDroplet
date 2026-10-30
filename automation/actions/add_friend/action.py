@@ -4,6 +4,8 @@ from typing import Any
 
 from automation.actions.add_friend.pages import (
     MainCameraOpenSearchPage,
+    ProfileSheetAddFinalPage,
+    ProfileSheetDismissPage,
     SearchClearPreviousPage,
     SearchClickAddUserPage,
     SearchRetryResultsPage,
@@ -37,6 +39,7 @@ class AddFriendAction(BaseAction):
 
         pages = [
             *COMMON_POPUP_PAGES,
+            ProfileSheetDismissPage(username),
             MainCameraOpenSearchPage(),
             SearchClearPreviousPage(username),
             SearchTypeUsernamePage(username),
@@ -44,7 +47,10 @@ class AddFriendAction(BaseAction):
             SearchViewAllResultsPage(username),
             SearchRetryResultsPage(username),
         ]
-        final_pages = [UserAddedFinalPage(username)]
+        final_pages = [
+            UserAddedFinalPage(username),
+            ProfileSheetAddFinalPage(username),
+        ]
 
         service = PagesService(
             pages=pages,

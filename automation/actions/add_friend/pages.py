@@ -5,6 +5,8 @@ from typing import Any
 
 from automation.actions.add_friend.rules import (
     MainCameraPageRule,
+    make_profile_sheet_add_final_rule,
+    make_profile_sheet_dismiss_rule,
     make_search_empty_rule,
     make_search_has_add_button_rule,
     make_search_needs_clear_rule,
@@ -149,7 +151,7 @@ class SearchClickAddUserPage(XmlPage):
         context["_add_click_attempt"] = attempt_idx + 1
 
         chosen = add_btns[0]
-        if attempt_idx == 0 and user_nodes:
+        if attempt_idx in (0, 1) and user_nodes:
             user_y = user_nodes[0].center.y
             chosen = min(add_btns, key=lambda b: abs(b.center.y - user_y))
         elif attempt_idx < len(add_btns):
@@ -159,7 +161,51 @@ class SearchClickAddUserPage(XmlPage):
 
         controller.report_status(f"Clicking Add for {self.target_username} (option {attempt_idx + 1})...")
         controller.click_element(chosen)
-        time.sleep(2.2)
+        time.sleep(2.6)
+
+
+class ProfileSheetDismissPage(XmlPage):
+    """Dismisses a leftover profile sheet when its username does not match target_username."""
+
+    def __init__(self, target_username: str):
+        super().__init__(make_profile_sheet_dismiss_rule(target_username))
+
+    def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        dismiss_btns = xml.get_elements_by_id("unified_profile_dismiss_button")
+        controller.report_status("Dismissing profile sheet back to search...")
+        if dismiss_btns:
+            controller.click_element(dismiss_btns[0])
+        else:
+            controller.click(Point(78, 136))
+        controller.set_location(Location.SEARCH_PAGE)
+        time.sleep(1.2)
+
+
+class ProfileSheetAddFinalPage(XmlPage):
+    """Final page if tapping a search result opened target_username's profile sheet: clicks Add and dismisses."""
+
+    def __init__(self, target_username: str):
+        super().__init__(make_profile_sheet_add_final_rule(target_username))
+
+    def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        add_btns = (
+            xml.get_elements_by_id("non_friend_profile_action/non_friend_action_button_single")
+            + xml.get_elements_by_content_desc("Add")
+            + xml.get_elements_by_text("Add")
+        )
+        if add_btns:
+            controller.report_status("Clicking Add on profile sheet...")
+            controller.click_element(add_btns[0])
+            time.sleep(1.8)
+
+        dismiss_btns = xml.get_elements_by_id("unified_profile_dismiss_button")
+        controller.report_status("Dismissing profile sheet back to search...")
+        if dismiss_btns:
+            controller.click_element(dismiss_btns[0])
+        else:
+            controller.click(Point(78, 136))
+        controller.set_location(Location.USER_ADDED_PAGE)
+        time.sleep(1.2)
 
 
 class UserAddedFinalPage(XmlPage):
