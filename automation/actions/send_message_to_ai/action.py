@@ -146,16 +146,22 @@ class SendMessageToAiAction(BaseAction):
                 controller.send_key(KeyType.ENTER)
                 time.sleep(1.0)
 
-        # Poll for the AI's new response without backgrounding the app
+        # Poll for the AI's new response.
+        # Wait ~6s for My AI to reply on the server, then pause & resume LandingPageActivity
+        # so Snapchat's Composer/Valdi view stops the typing indicator and mounts
+        # plugin_content_holder (chat_bot_response_message) into the accessibility hierarchy.
         controller.report_status("Waiting for My AI response...")
         poll_start = time.monotonic()
         deadline = poll_start + response_timeout
         ai_reply: Optional[str] = None
         last_candidate: Optional[str] = None
         poll_idx = 0
-        did_chat_reenter = False
+        did_second_sync = False
 
-        time.sleep(3.5)
+        time.sleep(6.0)
+        controller.park_in_background()
+        time.sleep(2.0)
+        controller.ensure_app_foreground(wait_seconds=4.0)
 
         while time.monotonic() < deadline:
             poll_idx += 1
@@ -220,21 +226,12 @@ class SendMessageToAiAction(BaseAction):
                 break
 
             # Fallback: if 22s have elapsed and the new reply bubble hasn't mounted yet,
-            # back out to CHATS_PAGE via top-left Back button and re-open My AI once.
-            if not did_chat_reenter and (time.monotonic() - poll_start >= 22.0):
-                did_chat_reenter = True
-                controller.click(Point(62, 147))
-                time.sleep(2.5)
-                chats_xml = controller.fetch_xml(max_retries=1)
-                ai_nodes = [
-                    n for n in chats_xml.get_elements_by_text("My AI")
-                    if n.center.y > 250
-                ]
-                if ai_nodes:
-                    controller.click(Point(420, ai_nodes[0].center.y))
-                else:
-                    controller.click(Point(420, 450))
-                time.sleep(4.5)
+            # pause and resume LandingPageActivity once more.
+            if not did_second_sync and (time.monotonic() - poll_start >= 22.0):
+                did_second_sync = True
+                controller.park_in_background()
+                time.sleep(2.0)
+                controller.ensure_app_foreground(wait_seconds=4.5)
                 continue
 
             time.sleep(3.0)
