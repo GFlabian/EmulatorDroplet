@@ -137,15 +137,25 @@ class SendMessageToAiAction(BaseAction):
             if post_tfs2 and post_tfs2[0].text.strip().lower() not in ("", "send a chat"):
                 controller.send_key(KeyType.ENTER)
                 time.sleep(1.0)
+            post_send_xml = post_send_xml2
+
+        # Dismiss soft keyboard if open (chat_input_text_field pushed above y=1850) so the bottom
+        # half of chat_message_list is not hidden behind Gboard.
+        cur_tfs = post_send_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
+        if cur_tfs and cur_tfs[0].center.y < 1850:
+            controller.send_key(KeyType.BACK)
+            time.sleep(1.0)
 
         # Poll for the AI's new response
         controller.report_status("Waiting for My AI response...")
         deadline = time.monotonic() + response_timeout
         ai_reply: Optional[str] = None
         last_candidate: Optional[str] = None
+        poll_idx = 0
 
         while time.monotonic() < deadline:
             time.sleep(2.0)
+            poll_idx += 1
             cur_xml = controller.fetch_xml()
             cur_responses = extract_ai_responses(cur_xml)
             if cur_responses:
@@ -168,6 +178,9 @@ class SendMessageToAiAction(BaseAction):
             if last_candidate:
                 ai_reply = last_candidate
                 break
+            # Scroll down the message list if the new AI response is below the fold
+            if poll_idx % 2 == 0:
+                controller.swipe(Point(540, 1300), Point(540, 450), duration_ms=300)
 
         if not ai_reply and last_candidate:
             ai_reply = last_candidate
