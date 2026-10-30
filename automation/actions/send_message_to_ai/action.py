@@ -126,36 +126,55 @@ class SendMessageToAiAction(BaseAction):
         controller.click(Point(985, 2195))
         time.sleep(1.5)
 
-        post_send_xml = controller.fetch_xml()
+        post_send_xml = controller.fetch_xml(max_retries=1)
         post_tfs = post_send_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
         if post_tfs and post_tfs[0].text.strip().lower() not in ("", "send a chat"):
             # Tap Gboard Send key once more
             controller.click(Point(985, 2195))
             time.sleep(1.2)
-            post_send_xml2 = controller.fetch_xml()
+            post_send_xml2 = controller.fetch_xml(max_retries=1)
             post_tfs2 = post_send_xml2.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
             if post_tfs2 and post_tfs2[0].text.strip().lower() not in ("", "send a chat"):
                 controller.send_key(KeyType.ENTER)
                 time.sleep(1.0)
             post_send_xml = post_send_xml2
 
-        # Poll for the AI's new response (keep Gboard state as-is to avoid triggering
-        # layout resize animations while My AI's typing indicator starts)
+        # Poll for the AI's new response
         controller.report_status("Waiting for My AI response...")
         deadline = time.monotonic() + response_timeout
         ai_reply: Optional[str] = None
         last_candidate: Optional[str] = None
         poll_idx = 0
-        empty_xml_streak = 0
+
+        # Give My AI ~4s to generate its response on the server before the first poll
+        time.sleep(4.0)
 
         while time.monotonic() < deadline:
-            time.sleep(2.0)
             poll_idx += 1
-            cur_xml = controller.fetch_xml(max_retries=1)
-            if not cur_xml.children:
-                empty_xml_streak += 1
-            else:
-                empty_xml_streak = 0
+            cur_xml = controller.fetch_xml(max_retries=0)
+
+            # Handle Android ANR 'Wait' dialog if one appears during polling
+            wait_btns = cur_xml.get_elements_by_id("android:id/aerr_wait")
+            if wait_btns:
+                controller.click_element(wait_btns[0])
+                time.sleep(3.0)
+                continue
+
+            # If uiautomator dump was blocked by My AI's continuous typing/Bitmoji animation
+            # (empty XML) or if 2 polls passed without the new message syncing, briefly
+            # background & resume LandingPageActivity. This stops the stuck typing animation,
+            # forces Snapchat to sync the conversation over HTTP, and stays on AI_CHAT_PAGE.
+            if not cur_xml.children or poll_idx in (2, 5, 8):
+                if not cur_xml.children or not last_candidate:
+                    controller.park_in_background()
+                    time.sleep(1.2)
+                    controller.ensure_app_foreground(wait_seconds=3.5)
+                    cur_xml = controller.fetch_xml(max_retries=1)
+                    wait_btns = cur_xml.get_elements_by_id("android:id/aerr_wait")
+                    if wait_btns:
+                        controller.click_element(wait_btns[0])
+                        time.sleep(3.0)
+                        cur_xml = controller.fetch_xml(max_retries=1)
 
             # If we are on Profile screen (e.g. accidental header tap), dismiss it
             prof_dismiss = cur_xml.get_elements_by_id("unified_profile_dismiss_button")
@@ -164,7 +183,7 @@ class SendMessageToAiAction(BaseAction):
                 time.sleep(1.5)
                 continue
 
-            # If we are on CHATS_PAGE (e.g. after backing out to force sync), re-open My AI row
+            # If we are on CHATS_PAGE, re-open My AI row
             in_chat = bool(
                 cur_xml.get_elements_by_id("com.snapchat.android:id/chat_message_list")
                 or cur_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
@@ -196,34 +215,16 @@ class SendMessageToAiAction(BaseAction):
                         ai_reply = latest
                         break
                     last_candidate = latest
+                    time.sleep(1.5)
                     continue
             if last_candidate:
                 ai_reply = last_candidate
                 break
-            # If the real-time websocket hasn't pushed the reply or typing animation is blocking
-            # uiautomator dump, tap the top-left chat Back button (62, 147) to return to
-            # CHATS_PAGE and re-open the My AI row (y > 250) to force HTTP sync.
-            if (in_chat and poll_idx in (5, 10)) or empty_xml_streak >= 2:
-                empty_xml_streak = 0
-                controller.click(Point(62, 147))
-                time.sleep(2.2)
-                sync_xml = controller.fetch_xml(max_retries=2)
-                prof_dismiss = sync_xml.get_elements_by_id("unified_profile_dismiss_button")
-                if prof_dismiss:
-                    controller.click_element(prof_dismiss[0])
-                    time.sleep(1.5)
-                    continue
-                ai_nodes = [
-                    n for n in sync_xml.get_elements_by_text("My AI")
-                    if n.center.y > 250
-                ]
-                if ai_nodes:
-                    controller.click(Point(420, ai_nodes[0].center.y))
-                    time.sleep(2.5)
-                continue
+
             # Scroll down the message list if the new AI response is below the fold
             if in_chat and poll_idx % 3 == 0:
                 controller.swipe(Point(540, 1100), Point(540, 450), duration_ms=300)
+            time.sleep(1.5)
 
         if not ai_reply and last_candidate:
             ai_reply = last_candidate
