@@ -145,8 +145,8 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
     )
 
     # Fallback: restart Snapchat and wait for MAIN_PAGE
-    controller.restart_app(wait_seconds=3.5)
-    deadline = time.monotonic() + 25.0
+    controller.restart_app(wait_seconds=5.0)
+    deadline = time.monotonic() + 45.0
     while time.monotonic() < deadline:
         xml = controller.fetch_xml()
         if is_on_main_page(xml):

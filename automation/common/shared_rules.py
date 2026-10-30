@@ -74,6 +74,12 @@ UpsellDismissPopupRule = XmlPageRule(
         "impala/photo_upsell_tray_dismiss_button",
         "com.google.android.gms:id/cancel",
         "com.snapchat.android:id/okay_button",
+        "sponsored_snap_eu_modal_smaller_ads_btn",
+        "sponsored_snap_eu_modal_larger_ads_btn",
+        'text="Choose Your Ad Experience"',
+        "com.snapchat.android:id/alert_dialog_title",
+        'text="Say Hi to My AI"',
+        "built on generative AI technology",
     ]
 )
 

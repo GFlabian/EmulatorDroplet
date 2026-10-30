@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from automation.common.models import AutomationError, Element
+from automation.common.models import AutomationError, Element, Point
 from automation.common.phone_controller import KeyType, PhoneController
 from automation.common.shared_rules import (
     AccountLoggedOutRule,
@@ -114,13 +114,15 @@ class AllowPermissionPopupPage(XmlPage):
 
 
 class UpsellDismissPopupPage(XmlPage):
-    """Dismisses upsell trays or Google Play Services cancelable dialogs."""
+    """Dismisses upsell trays, EU ad choice modals, My AI intro modals, or Google Play dialogs."""
 
     def __init__(self):
         super().__init__(UpsellDismissPopupRule)
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
         for rid in (
+            "sponsored_snap_eu_modal_smaller_ads_btn",
+            "sponsored_snap_eu_modal_larger_ads_btn",
             "impala/photo_upsell_tray_dismiss_button",
             "com.google.android.gms:id/cancel",
             "com.snapchat.android:id/okay_button",
@@ -128,7 +130,24 @@ class UpsellDismissPopupPage(XmlPage):
             btns = xml.get_elements_by_id(rid)
             if btns:
                 controller.click_element(btns[0])
+                controller.sleep(1.2)
                 return
+
+        if (
+            "com.snapchat.android:id/alert_dialog_title" in xml.raw
+            or "Say Hi to My AI" in xml.raw
+            or "built on generative AI technology" in xml.raw
+        ):
+            dialog_clickables = [
+                el for el in xml.clickable_elements
+                if el.center.y > 1900 and 150 <= el.center.x <= 930
+            ]
+            if dialog_clickables:
+                controller.click_element(dialog_clickables[-1])
+            else:
+                controller.click(Point(540, 2085))
+            controller.sleep(2.2)
+            return
 
 
 COMMON_POPUP_PAGES: list[XmlPage] = [

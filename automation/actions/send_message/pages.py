@@ -44,13 +44,32 @@ class ChatsListOpenFriendChatPage(XmlPage):
         target_lower = target.lower()
         controller.report_status(f"Looking for chat with {target}...")
 
+        # If an unread Snap viewer (opera_content_index:) is covering the Chats feed, back out of it first
+        if 'content-desc="opera_content_index:"' in xml.raw:
+            controller.send_key(KeyType.BACK)
+            time.sleep(1.2)
+            return
+
         # 1. Check if a chat row matching target is visible on CHATS_PAGE
         matches = [
             el for el in xml.get_elements_by_text_containing(target_lower)
             if 220 < el.center.y < 2150
         ]
         if matches:
-            controller.click(Point(400, matches[0].center.y))
+            row_y = matches[0].center.y
+            ff_items = [
+                it for it in xml.get_elements_by_id("com.snapchat.android:id/ff_item")
+                if it.bounds[0].y <= row_y <= it.bounds[1].y
+            ]
+            has_unread_snap = bool(ff_items and "tap to view" in (ff_items[0].content_desc or "").lower())
+            if ff_items:
+                row_y = ff_items[0].center.y
+            if has_unread_snap or context.get("tapped_chat_row"):
+                # Swiping right on a Chat row opens the conversation directly without playing an unread Snap
+                controller.swipe(Point(220, row_y), Point(820, row_y), duration_ms=260)
+            else:
+                context["tapped_chat_row"] = True
+                controller.click(Point(450, row_y))
             time.sleep(1.8)
             return
 
@@ -108,9 +127,7 @@ class SearchOpenFriendChatPage(XmlPage):
                 controller.click_element(tfs[0])
                 time.sleep(0.4)
             controller.keyboard(target)
-            time.sleep(0.4)
-            controller.click(Point(985, 2195))
-            time.sleep(2.0)
+            time.sleep(2.5)
             return
 
         # Look for a "Chat" button or the user's result row

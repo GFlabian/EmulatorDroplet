@@ -45,7 +45,11 @@ def _is_ai_chat_open(xml: Element) -> bool:
 
 AiChatConversationOpenRule = XmlPageRule(
     include=["com.snapchat.android:id/chat_input_text_field"],
-    exclude=['text="Say Hi to My AI"'],
+    exclude=[
+        'text="Say Hi to My AI"',
+        "com.snapchat.android:id/alert_dialog_title",
+        "built on generative AI technology",
+    ],
     predicate=_is_ai_chat_open,
 )
 

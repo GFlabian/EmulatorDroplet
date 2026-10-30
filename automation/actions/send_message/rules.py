@@ -44,6 +44,11 @@ def make_friend_conversation_open_rule(target_user: str) -> XmlPageRule:
 
     return XmlPageRule(
         include=["com.snapchat.android:id/chat_input_text_field"],
+        exclude=[
+            "com.snapchat.android:id/alert_dialog_title",
+            'text="Say Hi to My AI"',
+            "built on generative AI technology",
+        ],
         predicate=_pred,
     )
 

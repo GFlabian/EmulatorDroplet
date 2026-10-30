@@ -73,11 +73,8 @@ class SearchTypeUsernamePage(XmlPage):
         controller.click_element(tfs[0])
         time.sleep(0.4)
         controller.keyboard(self.target_username)
-        time.sleep(0.4)
-        # Tap Gboard bottom-right Search key (Point(985, 2195)) to submit without typing a stray letter
-        controller.click(Point(985, 2195))
         controller.set_location(Location.SEARCH_PAGE)
-        time.sleep(2.0)
+        time.sleep(2.5)
 
 
 class SearchViewAllResultsPage(XmlPage):
@@ -107,7 +104,6 @@ class SearchRetryResultsPage(XmlPage):
             controller.click_element(btns[0])
             time.sleep(2.5)
         else:
-            controller.click(Point(985, 2195))
             time.sleep(2.0)
 
 
@@ -129,10 +125,14 @@ class SearchClickAddUserPage(XmlPage):
         if not add_btns:
             raise AutomationError("ADD_BUTTON_NOT_FOUND", f"No Add button found for {self.target_username}")
 
-        # Prefer the Add button vertically aligned with the target username subtitle node if present
-        user_nodes = [
+        # Prefer the Add button vertically aligned with the target username result-subtitle node if present
+        subtitles = [
+            n for n in xml.get_elements_by_id("result-subtitle")
+            if target in (n.text or "").lower() or target in (n.content_desc or "").lower()
+        ]
+        user_nodes = subtitles or [
             n for n in xml.get_elements_by_text_containing(target)
-            if n.resource_id != "search-textfield" and "view all results" not in n.text.lower()
+            if n.resource_id not in ("search-textfield", "") and "view all results" not in n.text.lower()
         ]
         chosen = add_btns[0]
         if user_nodes:
