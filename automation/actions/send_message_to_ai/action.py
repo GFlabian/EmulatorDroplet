@@ -145,14 +145,25 @@ class SendMessageToAiAction(BaseAction):
         ai_reply: Optional[str] = None
         last_candidate: Optional[str] = None
         poll_idx = 0
-        did_resync = False
+        did_bg_sync = False
+        ai_header_polls = 0
 
-        # Give My AI ~4s to generate its reply while Gboard remains open
-        time.sleep(4.0)
+        # Give My AI ~6s to generate its reply on the server before the first poll
+        time.sleep(6.0)
 
         while time.monotonic() < deadline:
             poll_idx += 1
-            cur_xml = controller.fetch_xml(max_retries=1)
+            cur_xml = controller.fetch_xml(max_retries=0)
+
+            # If uiautomator dump was blocked by My AI's continuous typing/Bitmoji animation
+            # (empty XML), briefly pause & resume LandingPageActivity to stop the stuck
+            # animation and sync the conversation from the server.
+            if not cur_xml.children:
+                controller.park_in_background()
+                time.sleep(1.5)
+                controller.ensure_app_foreground(wait_seconds=6.0)
+                did_bg_sync = True
+                cur_xml = controller.fetch_xml(max_retries=1)
 
             # Handle Android ANR 'Wait' dialog if one appears during polling
             wait_btns = cur_xml.get_elements_by_id("android:id/aerr_wait")
@@ -168,7 +179,7 @@ class SendMessageToAiAction(BaseAction):
                 time.sleep(1.5)
                 continue
 
-            # If we are on CHATS_PAGE, re-open My AI row
+            # If we are on MAIN_PAGE (Camera), open Chat tab
             in_chat = bool(
                 cur_xml.get_elements_by_id("com.snapchat.android:id/chat_message_list")
                 or cur_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
@@ -180,7 +191,12 @@ class SendMessageToAiAction(BaseAction):
                 ]
                 if ai_nodes:
                     controller.click(Point(420, ai_nodes[0].center.y))
-                    time.sleep(3.5)
+                    time.sleep(4.5)
+                    continue
+                chat_tabs = cur_xml.get_elements_by_id("com.snapchat.android:id/ngs_chat_icon_container")
+                if chat_tabs:
+                    controller.click_element(chat_tabs[0])
+                    time.sleep(3.0)
                     continue
 
             cur_responses = extract_ai_responses(cur_xml)
@@ -194,6 +210,7 @@ class SendMessageToAiAction(BaseAction):
             last_is_ai = bool(senders and senders[-1] == "MY AI")
 
             if last_is_ai:
+                ai_header_polls += 1
                 if cur_responses:
                     latest = cur_responses[-1]
                     if len(cur_responses) > prev_count or latest != prev_last:
@@ -203,43 +220,28 @@ class SendMessageToAiAction(BaseAction):
                         last_candidate = latest
                         time.sleep(1.5)
                         continue
-                # MY AI sender header is already at the bottom of chat_message_list,
-                # but plugin_content_holder hasn't mounted its text node while Gboard is open.
-                # Dismiss Gboard now so chat_message_list expands and mounts plugin_content_holder.
-                cur_tfs = cur_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
-                if cur_tfs and cur_tfs[0].center.y < 1850:
-                    time.sleep(1.5)
-                    controller.send_key(KeyType.BACK)
-                    time.sleep(2.5)
-                    continue
+                # MY AI sender header is at the bottom of chat_message_list, waiting for
+                # plugin_content_holder to finish inflating. If it hasn't inflated after 2 polls
+                # while Gboard is open, dismiss Gboard once to trigger a clean layout pass.
+                if ai_header_polls >= 2:
+                    cur_tfs = cur_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
+                    if cur_tfs and cur_tfs[0].center.y < 1850:
+                        controller.send_key(KeyType.BACK)
+                        time.sleep(3.0)
+                        continue
+                time.sleep(3.0)
+                continue
 
             if last_candidate:
                 ai_reply = last_candidate
                 break
 
-            # If no MY AI bubble has appeared after ~16s (e.g. websocket stream shared across
-            # devices), do one clean round-trip to CHATS_PAGE to force HTTP conversation sync.
-            if not did_resync and (time.monotonic() - poll_start >= 16.0) and not last_is_ai:
-                did_resync = True
-                cur_tfs = cur_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
-                if cur_tfs and cur_tfs[0].center.y < 1850:
-                    controller.send_key(KeyType.BACK)
-                    time.sleep(1.5)
-                controller.click(Point(62, 147))
-                time.sleep(2.5)
-                sync_xml = controller.fetch_xml(max_retries=2)
-                prof_dismiss = sync_xml.get_elements_by_id("unified_profile_dismiss_button")
-                if prof_dismiss:
-                    controller.click_element(prof_dismiss[0])
-                    time.sleep(1.5)
-                    continue
-                ai_nodes = [
-                    n for n in sync_xml.get_elements_by_text("My AI")
-                    if n.center.y > 250
-                ]
-                if ai_nodes:
-                    controller.click(Point(420, ai_nodes[0].center.y))
-                    time.sleep(4.0)
+            # If no MY AI bubble has appeared after ~14s, pause & resume once to force sync
+            if not did_bg_sync and (time.monotonic() - poll_start >= 14.0) and not last_is_ai:
+                did_bg_sync = True
+                controller.park_in_background()
+                time.sleep(1.5)
+                controller.ensure_app_foreground(wait_seconds=6.0)
                 continue
 
             time.sleep(2.5)
