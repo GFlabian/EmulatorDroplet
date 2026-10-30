@@ -19,7 +19,7 @@ class PagesService:
         final_pages: list[XmlPage],
         timeout: int = 60,
         execute_last_page: bool = False,
-        max_executions_same_page: int = 5,
+        max_executions_same_page: int = 10,
         poll_interval: float = 0.6,
     ):
         if not final_pages:

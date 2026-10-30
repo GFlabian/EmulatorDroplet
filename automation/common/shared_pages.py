@@ -54,9 +54,9 @@ class SystemAnrDialogPage(XmlPage):
         context["_anr_count"] = anr_count
         is_snapchat_anr = "Snapchat isn't responding" in xml.raw
 
-        # If Snapchat itself has ANR'd 4+ times in the same flow, its UI thread is deadlocked;
+        # If Snapchat itself has ANR'd 2+ times in a row, its UI thread is deadlocked;
         # close the dialog, reset counter, and cleanly restart Snapchat once.
-        if is_snapchat_anr and anr_count >= 4:
+        if is_snapchat_anr and anr_count >= 2:
             context["_anr_count"] = 0
             close_btns = xml.get_elements_by_id("android:id/aerr_close")
             if close_btns:

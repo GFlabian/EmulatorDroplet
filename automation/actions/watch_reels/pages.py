@@ -16,6 +16,7 @@ class MainCameraOpenSpotlightPage(XmlPage):
         super().__init__(MainCameraPageRule)
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        context["_anr_count"] = 0
         btns = xml.get_elements_by_id("com.snapchat.android:id/ngs_spotlight_icon_container")
         if not btns:
             btns = xml.get_elements_by_content_desc("Spotlight")
