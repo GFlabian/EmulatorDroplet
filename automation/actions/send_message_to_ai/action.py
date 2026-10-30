@@ -145,31 +145,25 @@ class SendMessageToAiAction(BaseAction):
         ai_reply: Optional[str] = None
         last_candidate: Optional[str] = None
         poll_idx = 0
-        did_bg_sync = False
-        ai_header_polls = 0
+        did_second_sync = False
 
-        # Give My AI ~6s to generate its reply on the server before the first poll
-        time.sleep(6.0)
+        # Wait ~7s for My AI to generate its reply on the server, then do ONE clean
+        # pause & resume of LandingPageActivity so the stuck typing animation stops
+        # and RecyclerView mounts all plugin_content_holder response bubbles.
+        time.sleep(7.0)
+        controller.park_in_background()
+        time.sleep(2.5)
+        controller.ensure_app_foreground(wait_seconds=7.0)
 
         while time.monotonic() < deadline:
             poll_idx += 1
-            cur_xml = controller.fetch_xml(max_retries=0)
-
-            # If uiautomator dump was blocked by My AI's continuous typing/Bitmoji animation
-            # (empty XML), briefly pause & resume LandingPageActivity to stop the stuck
-            # animation and sync the conversation from the server.
-            if not cur_xml.children:
-                controller.park_in_background()
-                time.sleep(1.5)
-                controller.ensure_app_foreground(wait_seconds=6.0)
-                did_bg_sync = True
-                cur_xml = controller.fetch_xml(max_retries=1)
+            cur_xml = controller.fetch_xml(max_retries=1)
 
             # Handle Android ANR 'Wait' dialog if one appears during polling
             wait_btns = cur_xml.get_elements_by_id("android:id/aerr_wait")
             if wait_btns:
                 controller.click_element(wait_btns[0])
-                time.sleep(3.0)
+                time.sleep(3.5)
                 continue
 
             # If we are on Profile screen (e.g. accidental header tap), dismiss it
@@ -179,7 +173,7 @@ class SendMessageToAiAction(BaseAction):
                 time.sleep(1.5)
                 continue
 
-            # If we are on MAIN_PAGE (Camera), open Chat tab
+            # If we are on CHATS_PAGE or MAIN_PAGE, navigate back into My AI chat
             in_chat = bool(
                 cur_xml.get_elements_by_id("com.snapchat.android:id/chat_message_list")
                 or cur_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
@@ -191,7 +185,7 @@ class SendMessageToAiAction(BaseAction):
                 ]
                 if ai_nodes:
                     controller.click(Point(420, ai_nodes[0].center.y))
-                    time.sleep(4.5)
+                    time.sleep(5.0)
                     continue
                 chat_tabs = cur_xml.get_elements_by_id("com.snapchat.android:id/ngs_chat_icon_container")
                 if chat_tabs:
@@ -209,42 +203,30 @@ class SendMessageToAiAction(BaseAction):
             ]
             last_is_ai = bool(senders and senders[-1] == "MY AI")
 
-            if last_is_ai:
-                ai_header_polls += 1
-                if cur_responses:
-                    latest = cur_responses[-1]
-                    if len(cur_responses) > prev_count or latest != prev_last:
-                        if not latest.endswith("...") or last_candidate == latest:
-                            ai_reply = latest
-                            break
-                        last_candidate = latest
-                        time.sleep(1.5)
-                        continue
-                # MY AI sender header is at the bottom of chat_message_list, waiting for
-                # plugin_content_holder to finish inflating. If it hasn't inflated after 2 polls,
-                # pause & resume LandingPageActivity so RecyclerView re-binds plugin_content_holder.
-                if ai_header_polls in (2, 5):
-                    controller.park_in_background()
+            if last_is_ai and cur_responses:
+                latest = cur_responses[-1]
+                if len(cur_responses) > prev_count or latest != prev_last:
+                    if not latest.endswith("...") or last_candidate == latest:
+                        ai_reply = latest
+                        break
+                    last_candidate = latest
                     time.sleep(1.5)
-                    controller.ensure_app_foreground(wait_seconds=4.5)
-                    did_bg_sync = True
                     continue
-                time.sleep(3.0)
-                continue
 
             if last_candidate:
                 ai_reply = last_candidate
                 break
 
-            # If no MY AI bubble has appeared after ~14s, pause & resume once to force sync
-            if not did_bg_sync and (time.monotonic() - poll_start >= 14.0) and not last_is_ai:
-                did_bg_sync = True
+            # Only if 28s have elapsed and plugin_content_holder still hasn't mounted,
+            # do one more pause & resume and leave it undisturbed in the foreground.
+            if not did_second_sync and (time.monotonic() - poll_start >= 28.0):
+                did_second_sync = True
                 controller.park_in_background()
-                time.sleep(1.5)
-                controller.ensure_app_foreground(wait_seconds=6.0)
+                time.sleep(2.5)
+                controller.ensure_app_foreground(wait_seconds=8.0)
                 continue
 
-            time.sleep(2.5)
+            time.sleep(3.0)
 
         if not ai_reply and last_candidate:
             ai_reply = last_candidate
