@@ -44,24 +44,43 @@ class SubscreenDismissPopupPage(XmlPage):
 
 
 class SystemAnrDialogPage(XmlPage):
-    """Automatically dismisses Android 'isn't responding' (ANR) dialogs and brings Snapchat to foreground."""
+    """Automatically dismisses Android 'isn't responding' (ANR) dialogs and recovers Snapchat if hung."""
 
     def __init__(self):
         super().__init__(SystemAnrDialogRule)
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
-        for rid in ("android:id/aerr_wait", "android:id/aerr_close"):
-            btns = xml.get_elements_by_id(rid)
-            if btns:
-                controller.click_element(btns[0])
+        anr_count = int(context.get("_anr_count", 0)) + 1
+        context["_anr_count"] = anr_count
+        is_snapchat_anr = "Snapchat isn't responding" in xml.raw
+
+        # If Snapchat itself has ANR'd 2+ times in the same flow, its UI thread is deadlocked;
+        # close the dialog and cleanly restart Snapchat.
+        if is_snapchat_anr and anr_count >= 2:
+            close_btns = xml.get_elements_by_id("android:id/aerr_close")
+            if close_btns:
+                controller.click_element(close_btns[0])
                 controller.sleep(1.0)
-                controller.ensure_app_foreground()
-                return
-        wait_btns = xml.get_elements_by_text(["Wait", "Close app"])
+            controller.restart_app(wait_seconds=5.0)
+            return
+
+        wait_btns = xml.get_elements_by_id("android:id/aerr_wait")
+        if not wait_btns:
+            wait_btns = xml.get_elements_by_text(["Wait"])
         if wait_btns:
             controller.click_element(wait_btns[0])
+            controller.sleep(4.0 if is_snapchat_anr else 2.0)
+            if not is_snapchat_anr:
+                controller.ensure_app_foreground(wait_seconds=3.0)
+            return
+
+        close_btns = xml.get_elements_by_id("android:id/aerr_close")
+        if not close_btns:
+            close_btns = xml.get_elements_by_text(["Close app"])
+        if close_btns:
+            controller.click_element(close_btns[0])
             controller.sleep(1.0)
-            controller.ensure_app_foreground()
+            controller.restart_app(wait_seconds=5.0)
 
 
 class AndroidLauncherRecoveryPage(XmlPage):
