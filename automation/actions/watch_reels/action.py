@@ -60,19 +60,7 @@ class WatchReelsAction(BaseAction):
                 controller.swipe(Point(x, start_y), Point(x, end_y), duration_ms=random.randint(280, 380))
                 time.sleep(0.8)
 
-        # Return to MAIN_PAGE (Camera tab) after watching reels so the emulator does not
-        # continuously decode 60 FPS Spotlight video in the background while IDLE.
-        final_loc = Location.REELS_PAGE
-        try:
-            xml_end = controller.fetch_xml(max_retries=1)
-            cam_btns = xml_end.get_elements_by_id("com.snapchat.android:id/ngs_camera_icon_container")
-            if cam_btns:
-                controller.click_element(cam_btns[0])
-                time.sleep(1.0)
-                final_loc = Location.MAIN_PAGE
-        except Exception:
-            pass
-        controller.set_location(final_loc)
+        controller.set_location(Location.REELS_PAGE)
         return ActionResult(
             status=self.success_status,
             error=None,
@@ -82,5 +70,5 @@ class WatchReelsAction(BaseAction):
                 "max_wait": max_wait,
                 "total_wait_seconds": round(total_waited, 2),
             },
-            location=final_loc,
+            location=Location.REELS_PAGE,
         )
