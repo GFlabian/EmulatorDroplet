@@ -96,8 +96,7 @@ class BaseAction(ABC):
                 location=controller.location,
             )
         finally:
-            if self.action_name != "UPDATE_SESSION":
-                controller.park_in_background()
+            controller.park_in_background()
 
     @abstractmethod
     def run(self, controller: PhoneController, params: dict[str, Any]) -> ActionResult:

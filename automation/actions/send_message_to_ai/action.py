@@ -178,8 +178,19 @@ class SendMessageToAiAction(BaseAction):
             if last_candidate:
                 ai_reply = last_candidate
                 break
+            # If the real-time websocket hasn't pushed the reply after ~10s (e.g. when multiple
+            # devices share the same account), back out to CHATS_PAGE and re-open My AI to force HTTP sync.
+            if poll_idx in (5, 12):
+                controller.send_key(KeyType.BACK)
+                time.sleep(1.5)
+                sync_xml = controller.fetch_xml()
+                ai_nodes = sync_xml.get_elements_by_text("My AI")
+                if ai_nodes:
+                    controller.click(Point(420, ai_nodes[0].center.y))
+                    time.sleep(2.2)
+                continue
             # Scroll down the message list if the new AI response is below the fold
-            if poll_idx % 2 == 0:
+            if poll_idx % 3 == 0:
                 controller.swipe(Point(540, 1300), Point(540, 450), duration_ms=300)
 
         if not ai_reply and last_candidate:

@@ -134,14 +134,21 @@ class SearchClickAddUserPage(XmlPage):
             n for n in xml.get_elements_by_text_containing(target)
             if n.resource_id not in ("search-textfield", "") and "view all results" not in n.text.lower()
         ]
+        attempt_idx = int(context.get("_add_click_attempt", 0))
+        context["_add_click_attempt"] = attempt_idx + 1
+
         chosen = add_btns[0]
-        if user_nodes:
+        if attempt_idx == 0 and user_nodes:
             user_y = user_nodes[0].center.y
             chosen = min(add_btns, key=lambda b: abs(b.center.y - user_y))
+        elif attempt_idx < len(add_btns):
+            chosen = add_btns[attempt_idx]
+        else:
+            chosen = add_btns[-1]
 
-        controller.report_status(f"Clicking Add for {self.target_username}...")
+        controller.report_status(f"Clicking Add for {self.target_username} (option {attempt_idx + 1})...")
         controller.click_element(chosen)
-        time.sleep(2.0)
+        time.sleep(2.2)
 
 
 class UserAddedFinalPage(XmlPage):
