@@ -752,13 +752,18 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
     auto_mods = [m for m in sys.modules.keys() if m == "automation" or m.startswith("automation.")]
     auto_mods.sort(
         key=lambda m: (
-            0 if "shared_rules" in m else
-            1 if m.startswith("automation.common") else
-            2 if m.endswith(".rules") else
-            3 if m.endswith(".pages") else
-            4 if m.endswith(".action") else
-            5 if m.startswith("automation.actions") else
-            6,
+            0 if m == "automation.common.models" else
+            1 if m in ("automation.common.page_rule", "automation.common.xml_page", "automation.common.phone_controller") else
+            2 if m == "automation.common.shared_rules" else
+            3 if m in ("automation.common.shared_pages", "automation.common.pages_service", "automation.common.navigation") else
+            4 if m == "automation.common" else
+            5 if m == "automation.actions.base_action" else
+            6 if m.endswith(".rules") else
+            7 if m.endswith(".pages") else
+            8 if m.endswith(".action") else
+            9 if m.startswith("automation.actions.") else
+            10 if m == "automation.actions" else
+            11,
             m,
         )
     )
@@ -769,13 +774,15 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
         except Exception:
             pass
 
-    # Rebind top-level symbols and clear cached PhoneController instances so new methods take effect immediately
+    # Rebind top-level symbols and update/clear cached PhoneController instances so new methods take effect immediately
     global PhoneController, get_action, list_supported_actions, Location, AutomationError, ActionRecord
     if "emumanager" in sys.modules:
         try:
             emu_manager.__class__ = sys.modules["emumanager"].EmulatorManager
         except Exception:
             pass
+    if "automation.common.phone_controller" in sys.modules:
+        PhoneController = getattr(sys.modules["automation.common.phone_controller"], "PhoneController", PhoneController)
     if "automation" in sys.modules:
         auto_pkg = sys.modules["automation"]
         PhoneController = getattr(auto_pkg, "PhoneController", PhoneController)
@@ -785,6 +792,11 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
         AutomationError = getattr(auto_pkg, "AutomationError", AutomationError)
         ActionRecord = getattr(auto_pkg, "ActionRecord", ActionRecord)
     with registry._lock:
+        for ctrl in registry._controllers.values():
+            try:
+                ctrl.__class__ = PhoneController
+            except Exception:
+                pass
         registry._controllers.clear()
 
     if req and req.restart_service and platform.system().lower() == "linux":
