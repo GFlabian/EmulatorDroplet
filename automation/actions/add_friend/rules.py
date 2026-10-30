@@ -9,6 +9,8 @@ def _has_added_indicator(xml: Element) -> bool:
     return bool(
         xml.get_elements_by_id("quick-add-button-upsell-1")
         or xml.get_elements_by_id("quick-add-button-upsell-2")
+        or xml.get_elements_by_id("added-friend-button")
+        or xml.get_elements_by_id("subscribed-button")
         or xml.get_elements_by_text("Added")
         or xml.get_elements_by_content_desc("Added")
     )
@@ -54,7 +56,7 @@ def make_search_has_add_button_rule(target_username: str) -> XmlPageRule:
 
     def _pred(xml: Element) -> bool:
         tfs = xml.get_elements_by_id("search-textfield")
-        if not tfs or target not in tfs[0].text.strip().lower():
+        if not tfs or tfs[0].text.strip().lower() != target:
             return False
         if _has_added_indicator(xml):
             return False
@@ -68,7 +70,7 @@ def make_search_view_all_results_rule(target_username: str) -> XmlPageRule:
 
     def _pred(xml: Element) -> bool:
         tfs = xml.get_elements_by_id("search-textfield")
-        if not tfs or target not in tfs[0].text.strip().lower():
+        if not tfs or tfs[0].text.strip().lower() != target:
             return False
         if _has_added_indicator(xml) or _has_add_button(xml):
             return False
@@ -82,7 +84,7 @@ def make_search_retry_results_rule(target_username: str) -> XmlPageRule:
 
     def _pred(xml: Element) -> bool:
         tfs = xml.get_elements_by_id("search-textfield")
-        if not tfs or target not in tfs[0].text.strip().lower():
+        if not tfs or tfs[0].text.strip().lower() != target:
             return False
         if _has_added_indicator(xml) or _has_add_button(xml):
             return False
@@ -100,7 +102,7 @@ def make_user_added_final_rule(target_username: str) -> XmlPageRule:
 
     def _pred(xml: Element) -> bool:
         tfs = xml.get_elements_by_id("search-textfield")
-        if not tfs or target not in tfs[0].text.strip().lower():
+        if not tfs or tfs[0].text.strip().lower() != target:
             return False
         return _has_added_indicator(xml)
 
