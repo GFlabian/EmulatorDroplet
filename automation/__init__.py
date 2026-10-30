@@ -86,6 +86,8 @@ for _srv_mod_name in ("server", "__main__"):
     _srv_mod = sys.modules.get(_srv_mod_name)
     if _srv_mod is not None and hasattr(_srv_mod, "registry"):
         try:
+            if "emumanager" in sys.modules and hasattr(_srv_mod, "emu_manager"):
+                _srv_mod.emu_manager.__class__ = sys.modules["emumanager"].EmulatorManager
             for _ctrl in list(_srv_mod.registry._controllers.values()):
                 _ctrl.__class__ = PhoneController
         except Exception:

@@ -359,7 +359,7 @@ def _ensure_proxy_relay(host: str, port: int, user: str = "", password: str = ""
     key = (host, int(port), user, password)
     with _PROXY_RELAYS_LOCK:
         if key in _PROXY_RELAYS:
-            return f"http://127.0.0.1:{_PROXY_RELAYS[key]}"
+            return f"http://127.0.0.1:{_PROXY_RELAYS[key][0]}"
         auth_header = b""
         if user:
             b64 = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
@@ -375,8 +375,8 @@ def _ensure_proxy_relay(host: str, port: int, user: str = "", password: str = ""
             return srv.sockets[0].getsockname()[1], srv
 
         fut = asyncio.run_coroutine_threadsafe(_start(), loop)
-        local_port, _srv = fut.result(timeout=5.0)
-        _PROXY_RELAYS[key] = local_port
+        local_port, srv_obj = fut.result(timeout=5.0)
+        _PROXY_RELAYS[key] = (local_port, srv_obj)
         return f"http://127.0.0.1:{local_port}"
 
 
