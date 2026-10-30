@@ -682,7 +682,7 @@ class EmulatorManager:
                                [f"settings put global {k} 0" for k in
                                 ("window_animation_scale", "transition_animation_scale", "animator_duration_scale")] +
                                ["settings put secure stylus_handwriting_enabled 0",
-                                "settings put global hide_error_dialogs 1",
+                                "settings put global hide_error_dialogs 0",
                                 "settings put secure anr_show_background 0"])
             self._run_adb("-s", serial, "shell", script, timeout=120)
             self._save_state(name, slimmed=True)
@@ -831,7 +831,15 @@ class EmulatorManager:
 
     def start_app(self, name, package=SNAPCHAT_PACKAGE):
         """Launch an installed app's main launcher activity on a running emulator."""
-        script = f"monkey -p {_sh_quote(package)} -c android.intent.category.LAUNCHER 1"
+        if package == SNAPCHAT_PACKAGE:
+            script = (
+                "am start -a android.intent.action.MAIN "
+                "-c android.intent.category.LAUNCHER "
+                "-f 0x10200000 "
+                "-n com.snapchat.android/com.snapchat.android.LandingPageActivity"
+            )
+        else:
+            script = f"monkey -p {_sh_quote(package)} -c android.intent.category.LAUNCHER 1"
         out = self.adb(name, "shell", script, timeout=30)
         if "Error:" in out or "Exception" in out or "No activities found" in out:
             raise EmulatorError(f"starting {package} on {name} failed: {out}")

@@ -17,7 +17,7 @@ class PagesService:
         self,
         pages: list[XmlPage],
         final_pages: list[XmlPage],
-        timeout: int = 45,
+        timeout: int = 60,
         execute_last_page: bool = False,
         max_executions_same_page: int = 5,
         poll_interval: float = 0.6,
@@ -75,6 +75,11 @@ class PagesService:
                         expected_pages=expected_str,
                         xml_element=current_xml,
                     )
+                elif unknown_streak == 8:
+                    # If the screen is blank or unrecognized for 8 polls (~10-15s), nudge Snapchat to foreground
+                    raw = current_xml.raw if current_xml is not None else ""
+                    if len(raw) < 450:
+                        controller.ensure_app_foreground(wait_seconds=3.0)
                 time.sleep(self._poll_interval)
                 continue
 
@@ -125,6 +130,21 @@ class PagesService:
                 pages_history.append(p.name)
                 detected_page = p
                 break
+            elif time.monotonic() - last_page_ts > 6.0:
+                if pages_history.count(p.name) < self._max_executions_same_page:
+                    pages_history.append(p.name)
+                    detected_page = p
+                    break
+                if controller is not None:
+                    controller.record_unknown_page(
+                        reason=f"STUCK_ON_SAME_PAGE:{p.name}",
+                        expected_pages=expected_str,
+                        xml_element=current_xml,
+                    )
+                raise AutomationError(
+                    "STUCK_ON_SAME_PAGE",
+                    f"Stuck on page {p.name} after {self._max_executions_same_page} attempts",
+                )
 
         if detected_page is not None:
             for page_name in set(pages_history):

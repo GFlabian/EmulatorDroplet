@@ -2,15 +2,45 @@
 
 from typing import Any
 
-from automation.common.models import Element
-from automation.common.phone_controller import PhoneController
+from automation.common.models import AutomationError, Element
+from automation.common.phone_controller import KeyType, PhoneController
 from automation.common.shared_rules import (
+    AccountLoggedOutRule,
     AllowPermissionPopupRule,
     AndroidLauncherRule,
+    SubscreenDismissPopupRule,
     SystemAnrDialogRule,
     UpsellDismissPopupRule,
 )
 from automation.common.xml_page import XmlPage
+
+
+class AccountLoggedOutPage(XmlPage):
+    """Detects when Snapchat has logged out the current session and fails fast."""
+
+    def __init__(self):
+        super().__init__(AccountLoggedOutRule)
+
+    def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        raise AutomationError(
+            "ACCOUNT_LOGGED_OUT",
+            "Snapchat session is logged out on this device (Login/Signup screen detected)",
+        )
+
+
+class SubscreenDismissPopupPage(XmlPage):
+    """Dismisses accidental Spotlight subscreens (e.g. Trending Sounds / Original Sound)."""
+
+    def __init__(self):
+        super().__init__(SubscreenDismissPopupRule)
+
+    def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        btns = xml.get_elements_by_id("com.snapchat.android:id/subscreen_top_left")
+        if btns:
+            controller.click_element(btns[0])
+        else:
+            controller.send_key(KeyType.BACK)
+        controller.sleep(1.2)
 
 
 class SystemAnrDialogPage(XmlPage):
@@ -42,7 +72,7 @@ class AndroidLauncherRecoveryPage(XmlPage):
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
         controller.report_status("Bringing Snapchat to foreground...")
-        controller.ensure_app_foreground()
+        controller.ensure_app_foreground(wait_seconds=5.0)
 
 
 class AllowPermissionPopupPage(XmlPage):
@@ -82,8 +112,10 @@ class UpsellDismissPopupPage(XmlPage):
 
 
 COMMON_POPUP_PAGES: list[XmlPage] = [
+    AccountLoggedOutPage(),
     SystemAnrDialogPage(),
     AndroidLauncherRecoveryPage(),
     AllowPermissionPopupPage(),
     UpsellDismissPopupPage(),
+    SubscreenDismissPopupPage(),
 ]

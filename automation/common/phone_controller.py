@@ -26,7 +26,8 @@ class PhoneController:
     _DUMP_OK_SIGNATURE = "UI hierchary dumped to"
     _DUMP_AND_READ_CMD = (
         "rm -f /data/local/tmp/uidump.xml; "
-        "(uiautomator dump --compressed /data/local/tmp/uidump.xml || uiautomator dump /data/local/tmp/uidump.xml) && "
+        "(timeout 8 uiautomator dump --compressed /data/local/tmp/uidump.xml || "
+        "timeout 8 uiautomator dump /data/local/tmp/uidump.xml) && "
         "cat /data/local/tmp/uidump.xml"
     )
 

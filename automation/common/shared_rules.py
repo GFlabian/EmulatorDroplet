@@ -12,10 +12,13 @@ MainCameraPageRule = XmlPageRule(
         "com.snapchat.android:id/camera_page",
         "com.snapchat.android:id/camera_capture_button",
         "com.snapchat.android:id/ngs_memories_icon",
+        'text="Memories"',
+        'content-desc="Memories"',
     ],
     exclude=[
         "search-textfield",
         "unified_profile_dismiss_button",
+        "com.snapchat.android:id/favorite",
     ],
 )
 
@@ -92,5 +95,32 @@ AndroidLauncherRule = XmlPageRule(
     ],
     exclude=[
         "com.snapchat.android:id/",
+    ],
+)
+
+# Subscreen overlay (e.g., Sound / Trending Sounds / Topic page opened from Spotlight)
+SubscreenDismissPopupRule = XmlPageRule(
+    include_any=[
+        "sound_topic_ui/",
+        "com.snapchat.android:id/subscreen_top_left",
+        'text="Trending Sounds"',
+        'text="Use Sound"',
+    ],
+    exclude=[
+        "com.snapchat.android:id/ngs_camera_icon_container",
+        "search-textfield",
+        "unified_profile_dismiss_button",
+    ],
+)
+
+# Logged-out Snapchat Welcome / LoginSignup screen
+AccountLoggedOutRule = XmlPageRule(
+    include_any=[
+        "com.snapchat.android:id/login_text",
+        "Already have an account? Log In",
+        "com.snapchat.android:id/login_button_horizontal",
+    ],
+    exclude=[
+        "com.snapchat.android:id/ngs_camera_icon_container",
     ],
 )

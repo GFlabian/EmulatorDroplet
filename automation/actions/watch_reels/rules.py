@@ -11,17 +11,23 @@ def _is_on_spotlight_tab(xml: Element) -> bool:
     raw = xml.raw
     if "com.snapchat.android:id/camera_capture_button" in raw:
         return False
-    # On Spotlight tab: either Spotlight header/view or spotlight tab is selected
-    if "Spotlight" in raw and (
-        "spotlight" in raw.lower()
-        and (
-            "com.snapchat.android:id/ngs_spotlight_icon_container" in raw
-            or "trending" in raw.lower()
-            or "comment" in raw.lower()
+    if "com.snapchat.android:id/camera_page" in raw or "My AI" in raw or "chat_input_text_field" in raw:
+        return False
+    raw_lower = raw.lower()
+    if any(
+        marker in raw_lower
+        for marker in (
+            "com.snapchat.android:id/favorite",
+            "spotlight",
+            "swipe up to next",
+            "original sound",
+            "trending",
+            "#fyp",
         )
     ):
-        # Make sure we're not on MAIN_PAGE, CHATS_PAGE, or STORIES_PAGE
-        if "com.snapchat.android:id/camera_page" not in raw and "My AI" not in raw:
+        return True
+    if 'text="Camera"' in raw and "com.snapchat.android:id/ngs_spotlight_icon_container" in raw:
+        if 'text="Friends"' not in raw and 'text="New Chat"' not in raw:
             return True
     return False
 
