@@ -95,8 +95,6 @@ class BaseAction(ABC):
                 error=str(exc),
                 location=controller.location,
             )
-        finally:
-            controller.park_in_background()
 
     @abstractmethod
     def run(self, controller: PhoneController, params: dict[str, Any]) -> ActionResult:

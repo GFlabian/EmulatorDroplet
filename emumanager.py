@@ -514,7 +514,6 @@ class EmulatorManager:
             report("Opening Snapchat")
             self.start_app(name, SNAPCHAT_PACKAGE)
             time.sleep(12)
-            self.adb(name, "shell", "input keyevent 3", timeout=15)
         except BaseException:
             self.delete(name)
             raise

@@ -39,15 +39,16 @@ class UpdateSessionAction(BaseAction):
         if not target_username:
             raise AutomationError("MISSING_PARAMETER", "UPDATE_SESSION requires 'username' (or emulator account username)")
 
+        prev_loc = controller.location if controller.location != Location.UNKNOWN else Location.MAIN_PAGE
         info = controller.manager.save_snapchat_session(
             controller.avd_name,
             target_username,
             on_status=controller.report_status,
         )
-        time.sleep(2.5)
-        controller.set_location(Location.MAIN_PAGE)
+        controller.ensure_app_foreground(wait_seconds=4.0)
+        controller.set_location(prev_loc)
         return ActionResult(
             status=self.success_status,
-            location=Location.MAIN_PAGE,
+            location=prev_loc,
             data=info,
         )
