@@ -27,8 +27,7 @@ class PhoneController:
     _DUMP_OK_SIGNATURE = "UI hierchary dumped to"
     _DUMP_AND_READ_CMD = (
         "rm -f /data/local/tmp/uidump.xml; "
-        "(timeout 12 uiautomator dump --compressed /data/local/tmp/uidump.xml || "
-        "timeout 12 uiautomator dump /data/local/tmp/uidump.xml) && "
+        "timeout 10 uiautomator dump --compressed /data/local/tmp/uidump.xml && "
         "cat /data/local/tmp/uidump.xml"
     )
 
@@ -147,11 +146,8 @@ class PhoneController:
         last_err: Optional[Exception] = None
         for attempt in range(max_retries + 1):
             try:
-                out = self.shell(self._DUMP_AND_READ_CMD, timeout=25)
+                out = self.shell(self._DUMP_AND_READ_CMD, timeout=18)
                 xml_str = self._extract_xml(out)
-                if xml_str is None:
-                    out = self.shell(self._DUMP_AND_READ_CMD, timeout=25)
-                    xml_str = self._extract_xml(out)
 
                 if xml_str is None:
                     if (

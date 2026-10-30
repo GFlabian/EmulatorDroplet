@@ -945,6 +945,8 @@ class EmulatorManager:
             f"tar -cf {remote_tar} -C /data/data "
             f"--exclude='{SNAPCHAT_PACKAGE}/lib' "
             f"--exclude='{SNAPCHAT_PACKAGE}/code_cache' "
+            f"--exclude='{SNAPCHAT_PACKAGE}/cache' "
+            f"--exclude='{SNAPCHAT_PACKAGE}/app_webview/Default/Cache' "
             f"{SNAPCHAT_PACKAGE} && echo TAR_OK"
         )
         tar_out = self.adb(name, "shell", tar_script, timeout=timeout)
@@ -986,7 +988,11 @@ class EmulatorManager:
                 raise EmulatorError(f"extracted tar from {name} is missing {SNAPCHAT_PACKAGE}/ directory")
 
             archive_path = tmp / f"{session_name}.7z"
-            with py7zr.SevenZipFile(archive_path, "w") as zf:
+            with py7zr.SevenZipFile(
+                archive_path,
+                "w",
+                filters=[{"id": py7zr.FILTER_LZMA2, "preset": 1}],
+            ) as zf:
                 zf.writeall(pkg_dir, arcname=SNAPCHAT_PACKAGE)
 
             archive_size = archive_path.stat().st_size

@@ -139,24 +139,23 @@ class SendMessageToAiAction(BaseAction):
                 time.sleep(1.0)
             post_send_xml = post_send_xml2
 
-        # Dismiss soft keyboard if open (chat_input_text_field pushed above y=1850) so the bottom
-        # half of chat_message_list is not hidden behind Gboard.
-        cur_tfs = post_send_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
-        if cur_tfs and cur_tfs[0].center.y < 1850:
-            controller.send_key(KeyType.BACK)
-            time.sleep(1.0)
-
-        # Poll for the AI's new response
+        # Poll for the AI's new response (keep Gboard state as-is to avoid triggering
+        # layout resize animations while My AI's typing indicator starts)
         controller.report_status("Waiting for My AI response...")
         deadline = time.monotonic() + response_timeout
         ai_reply: Optional[str] = None
         last_candidate: Optional[str] = None
         poll_idx = 0
+        empty_xml_streak = 0
 
         while time.monotonic() < deadline:
             time.sleep(2.0)
             poll_idx += 1
-            cur_xml = controller.fetch_xml()
+            cur_xml = controller.fetch_xml(max_retries=1)
+            if not cur_xml.children:
+                empty_xml_streak += 1
+            else:
+                empty_xml_streak = 0
             cur_responses = extract_ai_responses(cur_xml)
             if cur_responses:
                 latest = cur_responses[-1]
@@ -178,13 +177,14 @@ class SendMessageToAiAction(BaseAction):
             if last_candidate:
                 ai_reply = last_candidate
                 break
-            # If the real-time websocket hasn't pushed the reply after ~8s (e.g. when multiple
-            # devices share the same account), tap the top-left chat Back button (62, 147) to
-            # return to CHATS_PAGE and re-open the My AI row (y > 250) to force HTTP sync.
-            if poll_idx in (4, 9):
+            # If the real-time websocket hasn't pushed the reply or typing animation is blocking
+            # uiautomator dump, tap the top-left chat Back button (62, 147) to return to
+            # CHATS_PAGE and re-open the My AI row (y > 250) to force HTTP sync.
+            if poll_idx in (4, 9) or empty_xml_streak >= 2:
+                empty_xml_streak = 0
                 controller.click(Point(62, 147))
-                time.sleep(1.6)
-                sync_xml = controller.fetch_xml()
+                time.sleep(1.8)
+                sync_xml = controller.fetch_xml(max_retries=2)
                 prof_dismiss = sync_xml.get_elements_by_id("unified_profile_dismiss_button")
                 if prof_dismiss:
                     controller.click_element(prof_dismiss[0])
@@ -200,7 +200,7 @@ class SendMessageToAiAction(BaseAction):
                 continue
             # Scroll down the message list if the new AI response is below the fold
             if poll_idx % 3 == 0:
-                controller.swipe(Point(540, 1300), Point(540, 450), duration_ms=300)
+                controller.swipe(Point(540, 1100), Point(540, 450), duration_ms=300)
 
         if not ai_reply and last_candidate:
             ai_reply = last_candidate
