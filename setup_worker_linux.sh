@@ -16,8 +16,8 @@ if [ ! -f /swapfile ]; then
   fi
 fi
 sysctl -w vm.swappiness=20 >/dev/null 2>&1 || true
-echo 4000 > /sys/kernel/mm/ksm/pages_to_scan 2>/dev/null || true
-echo 20 > /sys/kernel/mm/ksm/sleep_millisecs 2>/dev/null || true
+echo 800 > /sys/kernel/mm/ksm/pages_to_scan 2>/dev/null || true
+echo 100 > /sys/kernel/mm/ksm/sleep_millisecs 2>/dev/null || true
 echo 1 > /sys/kernel/mm/ksm/use_zero_pages 2>/dev/null || true
 echo 1 > /sys/kernel/mm/ksm/run 2>/dev/null || true
 echo 25 > /sys/module/zswap/parameters/max_pool_percent 2>/dev/null || true

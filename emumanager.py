@@ -387,8 +387,8 @@ class EmulatorManager:
         Operates purely in the Linux host kernel with zero change to the Android guest.
         """
         tunables = (
-            ("/sys/kernel/mm/ksm/pages_to_scan", "4000"),
-            ("/sys/kernel/mm/ksm/sleep_millisecs", "20"),
+            ("/sys/kernel/mm/ksm/pages_to_scan", "800"),
+            ("/sys/kernel/mm/ksm/sleep_millisecs", "100"),
             ("/sys/kernel/mm/ksm/use_zero_pages", "1"),
             ("/sys/kernel/mm/ksm/run", "1"),
             ("/sys/module/zswap/parameters/max_pool_percent", "25"),
@@ -513,6 +513,8 @@ class EmulatorManager:
                 self.load_snapchat_session(name, username)
             report("Opening Snapchat")
             self.start_app(name, SNAPCHAT_PACKAGE)
+            time.sleep(5)
+            self.adb(name, "shell", "input keyevent 3", timeout=15)
         except BaseException:
             self.delete(name)
             raise

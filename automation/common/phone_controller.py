@@ -12,6 +12,7 @@ import db
 
 
 class KeyType:
+    HOME = 3
     BACK = 4
     ENTER = 66
     SPACE = 62
@@ -243,6 +244,13 @@ class PhoneController:
         """Bring Snapchat to the foreground without force-stopping it."""
         self.manager.start_app(self.avd_name, package)
         time.sleep(wait_seconds)
+
+    def park_in_background(self):
+        """Send KEYCODE_HOME so Snapchat pauses Camera/Video rendering while the emulator is IDLE."""
+        try:
+            self.send_key(KeyType.HOME)
+        except Exception:
+            pass
 
     def restart_app(self, package: str = SNAPCHAT_PACKAGE, wait_seconds: float = 4.0):
         """Force-stop and relaunch Snapchat, resetting location to MAIN_PAGE."""

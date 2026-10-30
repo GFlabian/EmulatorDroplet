@@ -47,6 +47,8 @@ class BaseAction(ABC):
             details={"params": params, "start_location": controller.location},
         )
         try:
+            if self.action_name != "UPDATE_SESSION":
+                controller.ensure_app_foreground(wait_seconds=2.5)
             self.prepare_start_position(controller, params)
             res = self.run(controller, params)
             controller.log_event(
@@ -93,6 +95,9 @@ class BaseAction(ABC):
                 error=str(exc),
                 location=controller.location,
             )
+        finally:
+            if self.action_name != "UPDATE_SESSION":
+                controller.park_in_background()
 
     @abstractmethod
     def run(self, controller: PhoneController, params: dict[str, Any]) -> ActionResult:
