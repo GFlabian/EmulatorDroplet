@@ -221,14 +221,14 @@ class SendMessageToAiAction(BaseAction):
                         time.sleep(1.5)
                         continue
                 # MY AI sender header is at the bottom of chat_message_list, waiting for
-                # plugin_content_holder to finish inflating. If it hasn't inflated after 2 polls
-                # while Gboard is open, dismiss Gboard once to trigger a clean layout pass.
-                if ai_header_polls >= 2:
-                    cur_tfs = cur_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
-                    if cur_tfs and cur_tfs[0].center.y < 1850:
-                        controller.send_key(KeyType.BACK)
-                        time.sleep(3.0)
-                        continue
+                # plugin_content_holder to finish inflating. If it hasn't inflated after 2 polls,
+                # pause & resume LandingPageActivity so RecyclerView re-binds plugin_content_holder.
+                if ai_header_polls in (2, 5):
+                    controller.park_in_background()
+                    time.sleep(1.5)
+                    controller.ensure_app_foreground(wait_seconds=4.5)
+                    did_bg_sync = True
+                    continue
                 time.sleep(3.0)
                 continue
 
