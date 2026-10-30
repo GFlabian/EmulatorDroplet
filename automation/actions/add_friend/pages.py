@@ -177,7 +177,10 @@ class ProfileSheetDismissPage(XmlPage):
         super().__init__(make_profile_sheet_dismiss_rule(target_username))
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
-        dismiss_btns = xml.get_elements_by_id("unified_profile_dismiss_button")
+        dismiss_btns = (
+            xml.get_elements_by_id("unified_profile_dismiss_button")
+            or xml.get_elements_by_id("upp-close-button")
+        )
         controller.report_status("Dismissing profile sheet back to search...")
         if dismiss_btns:
             controller.click_element(dismiss_btns[0])
@@ -196,6 +199,8 @@ class ProfileSheetAddFinalPage(XmlPage):
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
         add_btns = (
             xml.get_elements_by_id("non_friend_profile_action/non_friend_action_button_single")
+            + xml.get_elements_by_id("subscribe-button")
+            + xml.get_elements_by_content_desc("AddFriendButton.onRenderAddButton")
             + xml.get_elements_by_content_desc("Add")
             + xml.get_elements_by_text("Add")
         )
@@ -204,7 +209,10 @@ class ProfileSheetAddFinalPage(XmlPage):
             controller.click_element(add_btns[0])
             time.sleep(1.8)
 
-        dismiss_btns = xml.get_elements_by_id("unified_profile_dismiss_button")
+        dismiss_btns = (
+            xml.get_elements_by_id("unified_profile_dismiss_button")
+            or xml.get_elements_by_id("upp-close-button")
+        )
         controller.report_status("Dismissing profile sheet back to search...")
         if dismiss_btns:
             controller.click_element(dismiss_btns[0])

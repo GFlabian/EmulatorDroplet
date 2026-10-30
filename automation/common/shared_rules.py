@@ -52,6 +52,8 @@ ProfileScreenRule = XmlPageRule(
     include_any=[
         "unified_profile_dismiss_button",
         "unified_profile_icon_button_settings",
+        "upp-close-button",
+        "upp-header-bar",
     ]
 )
 

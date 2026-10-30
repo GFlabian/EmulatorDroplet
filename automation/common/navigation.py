@@ -100,6 +100,8 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
         clicked_back = False
         for rid in (
             "dismiss-button",
+            "upp-close-button",
+            "unified_profile_dismiss_button",
             "com.snapchat.android:id/unified_profile_dismiss_button",
             "com.snapchat.android:id/subscreen_top_left",
             "com.snapchat.android:id/chat_input_bar_back",

@@ -135,15 +135,28 @@ _PROFILE_SHEET_IDS = [
     "ProfileFlatlandFriendOrGroupProfileHeaderUnifiedView",
     "unified_profile_dismiss_button",
     "non_friend_profile_action/non_friend_action_button_single",
+    "upp-header-bar",
+    "upp-close-button",
+    "upp-username",
 ]
+
+
+def _get_profile_sheet_username(xml: Element) -> str:
+    unames = (
+        xml.get_elements_by_id("profile_identity_section_username")
+        or xml.get_elements_by_id("upp-username")
+    )
+    if unames:
+        return (unames[0].text or unames[0].content_desc or "").strip().lower()
+    return ""
 
 
 def make_profile_sheet_dismiss_rule(target_username: str) -> XmlPageRule:
     target = target_username.strip().lower()
 
     def _pred(xml: Element) -> bool:
-        unames = xml.get_elements_by_id("profile_identity_section_username")
-        if unames and unames[0].text.strip().lower() == target:
+        uname = _get_profile_sheet_username(xml)
+        if uname and uname == target:
             return False
         return True
 
@@ -154,8 +167,8 @@ def make_profile_sheet_add_final_rule(target_username: str) -> XmlPageRule:
     target = target_username.strip().lower()
 
     def _pred(xml: Element) -> bool:
-        unames = xml.get_elements_by_id("profile_identity_section_username")
-        return bool(unames and unames[0].text.strip().lower() == target)
+        uname = _get_profile_sheet_username(xml)
+        return bool(uname and uname == target)
 
     return XmlPageRule(include_any=_PROFILE_SHEET_IDS, predicate=_pred)
 
