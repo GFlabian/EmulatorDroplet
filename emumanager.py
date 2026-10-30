@@ -35,6 +35,8 @@ Command line:
 """
 
 import argparse
+import asyncio
+import base64
 import concurrent.futures
 import ctypes
 import datetime
@@ -285,8 +287,101 @@ def _read_props(path):
     return props
 
 
+_PROXY_RELAYS = {}
+_PROXY_RELAYS_LOCK = threading.Lock()
+_PROXY_LOOP = None
+
+
+def _get_proxy_loop():
+    global _PROXY_LOOP
+    if _PROXY_LOOP is None:
+        loop = asyncio.new_event_loop()
+        t = threading.Thread(target=loop.run_forever, daemon=True, name="emu-proxy-relay")
+        t.start()
+        _PROXY_LOOP = loop
+    return _PROXY_LOOP
+
+
+async def _relay_pipe(reader, writer):
+    try:
+        while True:
+            data = await reader.read(32768)
+            if not data:
+                break
+            writer.write(data)
+            await writer.drain()
+    except Exception:
+        pass
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+
+
+async def _handle_proxy_client(client_reader, client_writer, up_host, up_port, auth_header):
+    up_writer = None
+    try:
+        up_reader, up_writer = await asyncio.wait_for(
+            asyncio.open_connection(up_host, up_port), timeout=12.0
+        )
+        req = await asyncio.wait_for(client_reader.readuntil(b"\r\n\r\n"), timeout=12.0)
+        if auth_header and b"proxy-authorization:" not in req.lower():
+            req = req[:-2] + auth_header + b"\r\n\r\n"
+        up_writer.write(req)
+        await up_writer.drain()
+
+        if req.upper().startswith(b"CONNECT "):
+            resp = await asyncio.wait_for(up_reader.readuntil(b"\r\n\r\n"), timeout=12.0)
+            first_line = resp.split(b"\r\n", 1)[0]
+            if b" 200 " in first_line:
+                client_writer.write(b"HTTP/1.0 200 Connection established\r\n\r\n")
+            else:
+                client_writer.write(resp)
+            await client_writer.drain()
+
+        await asyncio.gather(
+            _relay_pipe(client_reader, up_writer),
+            _relay_pipe(up_reader, client_writer),
+        )
+    except Exception:
+        pass
+    finally:
+        for w in (client_writer, up_writer):
+            if w is not None:
+                try:
+                    w.close()
+                except Exception:
+                    pass
+
+
+def _ensure_proxy_relay(host: str, port: int, user: str = "", password: str = "") -> str:
+    key = (host, int(port), user, password)
+    with _PROXY_RELAYS_LOCK:
+        if key in _PROXY_RELAYS:
+            return f"http://127.0.0.1:{_PROXY_RELAYS[key]}"
+        auth_header = b""
+        if user:
+            b64 = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+            auth_header = f"Proxy-Authorization: Basic {b64}".encode("ascii")
+        loop = _get_proxy_loop()
+
+        async def _start():
+            srv = await asyncio.start_server(
+                lambda r, w: _handle_proxy_client(r, w, host, int(port), auth_header),
+                "127.0.0.1",
+                0,
+            )
+            return srv.sockets[0].getsockname()[1], srv
+
+        fut = asyncio.run_coroutine_threadsafe(_start(), loop)
+        local_port, _srv = fut.result(timeout=5.0)
+        _PROXY_RELAYS[key] = local_port
+        return f"http://127.0.0.1:{local_port}"
+
+
 def _proxy_url(proxy):
-    """Convert host:port[:user:password] to the emulator's HTTP proxy URL."""
+    """Convert host:port[:user:password] to a normalized local HTTP proxy URL for QEMU."""
     if proxy is None:
         return None
     parts = proxy.split(":", 3)
@@ -296,9 +391,9 @@ def _proxy_url(proxy):
             or not 1 <= int(parts[1]) <= 65535
             or any(ord(c) < 32 or ord(c) == 127 for c in proxy)):
         raise EmulatorError("proxy must be host:port or host:port:user:password (port 1-65535)")
-    host, port = parts[:2]
-    auth = f"{parts[2]}:{parts[3]}@" if len(parts) == 4 else ""
-    return f"http://{auth}{host}:{port}"
+    host, port = parts[0], int(parts[1])
+    user, password = (parts[2], parts[3]) if len(parts) == 4 else ("", "")
+    return _ensure_proxy_relay(host, port, user, password)
 
 
 class Device(str):
@@ -684,7 +779,8 @@ class EmulatorManager:
                                 ("window_animation_scale", "transition_animation_scale", "animator_duration_scale")] +
                                ["settings put secure stylus_handwriting_enabled 0",
                                 "settings put global hide_error_dialogs 0",
-                                "settings put secure anr_show_background 0"])
+                                "settings put secure anr_show_background 0",
+                                "settings put global block_untrusted_touches 0"])
             self._run_adb("-s", serial, "shell", script, timeout=120)
             self._save_state(name, slimmed=True)
             self._log(f"{name}: removed preinstalled apps, animations off")

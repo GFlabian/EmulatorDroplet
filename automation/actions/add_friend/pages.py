@@ -71,10 +71,10 @@ class SearchTypeUsernamePage(XmlPage):
             raise AutomationError("SEARCH_INPUT_NOT_FOUND", "search-textfield not found")
         controller.report_status(f"Searching for {self.target_username}...")
         controller.click_element(tfs[0])
-        time.sleep(0.4)
+        time.sleep(0.8)
         controller.keyboard(self.target_username)
         controller.set_location(Location.SEARCH_PAGE)
-        time.sleep(2.5)
+        time.sleep(2.2)
 
 
 class SearchViewAllResultsPage(XmlPage):
@@ -92,17 +92,28 @@ class SearchViewAllResultsPage(XmlPage):
 
 
 class SearchRetryResultsPage(XmlPage):
-    """If 'Couldn't load results' / 'Try Again' appears on search, clicks Try Again."""
+    """If 'Couldn't load results' / 'Try Again' appears on search, clicks Try Again or clears and re-types."""
 
     def __init__(self, target_username: str):
         super().__init__(make_search_retry_results_rule(target_username))
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        retry_count = int(context.get("_search_retry_count", 0))
+        context["_search_retry_count"] = retry_count + 1
+        clear_btns = xml.get_elements_by_id("clear-button")
+        if retry_count >= 2 and clear_btns:
+            controller.report_status("Clearing search box to force fresh search...")
+            controller.click_element(clear_btns[0])
+            time.sleep(1.0)
+            return
         btns = xml.get_elements_by_id("retry-button") or xml.get_elements_by_text("Try Again")
         if btns:
             controller.report_status("Retrying search results load...")
             controller.click_element(btns[0])
             time.sleep(2.5)
+        elif clear_btns:
+            controller.click_element(clear_btns[0])
+            time.sleep(1.0)
         else:
             time.sleep(2.0)
 

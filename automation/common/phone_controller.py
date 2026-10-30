@@ -27,8 +27,8 @@ class PhoneController:
     _DUMP_OK_SIGNATURE = "UI hierchary dumped to"
     _DUMP_AND_READ_CMD = (
         "rm -f /data/local/tmp/uidump.xml; "
-        "timeout 7 uiautomator dump --compressed /data/local/tmp/uidump.xml && "
-        "cat /data/local/tmp/uidump.xml"
+        "timeout 12 uiautomator dump --compressed /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "cat /data/local/tmp/uidump.xml 2>/dev/null"
     )
 
     def __init__(
@@ -153,23 +153,15 @@ class PhoneController:
         attempt = 0
         while attempt <= max_retries:
             try:
-                out = self.shell(self._DUMP_AND_READ_CMD, timeout=18)
+                out = self.shell(self._DUMP_AND_READ_CMD, timeout=22)
                 xml_str = self._extract_xml(out)
 
                 if xml_str is None:
-                    if (
-                        not out.strip()
-                        or self._NULL_ROOT_SIGNATURE in out
-                        or "ERROR: could not get idle state" in out
-                        or "Killed" in out
-                        or "Terminated" in out
-                    ):
-                        if attempt < max_retries:
-                            attempt += 1
-                            time.sleep(initial_delay)
-                            continue
-                        return self.empty_element()
-                    raise AutomationError("XML_FETCH_FAILED", f"Could not dump UI XML: {out[:200]}")
+                    if attempt < max_retries:
+                        attempt += 1
+                        time.sleep(initial_delay)
+                        continue
+                    return self.empty_element()
 
                 root = ET.fromstring(xml_str)
                 elem = Element(root)
@@ -182,10 +174,19 @@ class PhoneController:
                         self.log_event(
                             level="WARN",
                             event_type="ANR_AUTO_WAIT",
-                            message=f"Auto-clicking 'Wait' on ANR dialog ({anr_dismissals}/3)",
+                            message=f"Auto-dismissing ANR dialog ({anr_dismissals}/3)",
                         )
-                        self.click_element(wait_btns[0])
-                        time.sleep(2.5)
+                        pt = wait_btns[0].click_point
+                        if anr_dismissals >= 2 and "snapchat" in xml_str.lower():
+                            self.restart_app(wait_seconds=6.0)
+                        else:
+                            self.shell(
+                                f"settings put global block_untrusted_touches 0; "
+                                f"am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1; "
+                                f"input tap {int(pt.x)} {int(pt.y)}",
+                                timeout=15,
+                            )
+                            time.sleep(2.0)
                         continue
                 self.last_xml = elem
                 return elem
@@ -195,19 +196,18 @@ class PhoneController:
                     time.sleep(initial_delay * (1.5 ** attempt))
                     attempt += 1
                     continue
-                break
-        if isinstance(last_err, AutomationError):
-            raise last_err
-        raise AutomationError("XML_FETCH_FAILED", f"Failed to fetch XML: {last_err}")
+                return self.empty_element()
+        return self.empty_element()
 
     @classmethod
     def _extract_xml(cls, output: str) -> Optional[str]:
         start = output.find("<?xml")
-        if start != -1 and cls._DUMP_OK_SIGNATURE in output:
+        if start != -1:
             end = output.rfind("</hierarchy>")
             if end != -1:
                 return output[start : end + len("</hierarchy>")]
-            return output[start:]
+            if cls._DUMP_OK_SIGNATURE in output:
+                return output[start:]
         return None
 
     @staticmethod

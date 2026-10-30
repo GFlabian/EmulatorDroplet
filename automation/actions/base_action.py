@@ -48,7 +48,10 @@ class BaseAction(ABC):
         )
         try:
             if self.action_name != "UPDATE_SESSION":
-                controller.ensure_app_foreground(wait_seconds=5.0)
+                if controller.location in (Location.INITIALIZING, Location.UNKNOWN):
+                    controller.ensure_app_foreground(wait_seconds=4.5)
+                elif controller.location not in (Location.USER_ADDED_PAGE, Location.SEARCH_PAGE):
+                    controller.ensure_app_foreground(wait_seconds=2.0)
             self.prepare_start_position(controller, params)
             res = self.run(controller, params)
             controller.log_event(

@@ -49,9 +49,9 @@ class AddFriendAction(BaseAction):
         service = PagesService(
             pages=pages,
             final_pages=final_pages,
-            timeout=40,
+            timeout=90,
             execute_last_page=True,
-            max_executions_same_page=4,
+            max_executions_same_page=6,
         )
         service.execute(controller, context={"username": username})
         controller.set_location(Location.USER_ADDED_PAGE)

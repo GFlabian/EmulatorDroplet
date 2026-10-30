@@ -69,6 +69,11 @@ class PagesService:
 
             if detected_page is None:
                 unknown_streak += 1
+                raw = current_xml.raw if current_xml is not None else ""
+                if "com.google.android.apps.nexuslauncher" in raw:
+                    controller.ensure_app_foreground(wait_seconds=4.0)
+                    time.sleep(self._poll_interval)
+                    continue
                 if unknown_streak == 4:
                     controller.record_unknown_page(
                         reason="UNKNOWN_SCREEN_POLLING",
@@ -77,7 +82,6 @@ class PagesService:
                     )
                 elif unknown_streak == 8:
                     # If the screen is blank or unrecognized for 8 polls (~10-15s), nudge Snapchat to foreground
-                    raw = current_xml.raw if current_xml is not None else ""
                     if len(raw) < 450:
                         controller.ensure_app_foreground(wait_seconds=3.0)
                 time.sleep(self._poll_interval)
