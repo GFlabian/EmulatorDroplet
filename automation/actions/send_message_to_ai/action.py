@@ -83,7 +83,7 @@ class SendMessageToAiAction(BaseAction):
         # plugin_content_holder (chat_bot_response_message). Back out to CHATS_PAGE
         # first so ChatsListOpenMyAiPage mounts a fresh AI_CHAT_PAGE fragment.
         initial_xml = controller.fetch_xml(max_retries=1)
-        if AiChatReadyFinalPage().matches(initial_xml):
+        if AiChatReadyFinalPage().rule.matches(initial_xml):
             controller.click(Point(62, 147))
             time.sleep(2.5)
 
