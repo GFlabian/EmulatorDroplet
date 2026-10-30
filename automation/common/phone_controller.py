@@ -55,6 +55,7 @@ class PhoneController:
         self._on_status = on_status
         self._on_location = on_location
         self._location = initial_location
+        self._last_snap_anr_ts: float = 0.0
 
     @property
     def location(self) -> str:
@@ -171,13 +172,20 @@ class PhoneController:
                         wait_btns = elem.get_elements_by_text("Wait")
                     if wait_btns:
                         anr_dismissals += 1
+                        is_snap_anr = "snapchat" in xml_str.lower()
+                        now_ts = time.monotonic()
+                        last_snap_anr = getattr(self, "_last_snap_anr_ts", 0.0)
+                        repeat_snap_anr = is_snap_anr and (now_ts - last_snap_anr <= 45.0)
+                        if is_snap_anr:
+                            self._last_snap_anr_ts = now_ts
                         self.log_event(
                             level="WARN",
                             event_type="ANR_AUTO_WAIT",
-                            message=f"Auto-dismissing ANR dialog ({anr_dismissals}/3)",
+                            message=f"Auto-dismissing ANR dialog ({anr_dismissals}/3, repeat={repeat_snap_anr})",
                         )
                         pt = wait_btns[0].click_point
-                        if anr_dismissals >= 2 and "snapchat" in xml_str.lower():
+                        if repeat_snap_anr or (anr_dismissals >= 2 and is_snap_anr):
+                            self._last_snap_anr_ts = 0.0
                             self.restart_app(wait_seconds=6.0)
                         else:
                             self.shell(
