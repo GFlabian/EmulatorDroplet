@@ -156,6 +156,29 @@ class SendMessageToAiAction(BaseAction):
                 empty_xml_streak += 1
             else:
                 empty_xml_streak = 0
+
+            # If we are on Profile screen (e.g. accidental header tap), dismiss it
+            prof_dismiss = cur_xml.get_elements_by_id("unified_profile_dismiss_button")
+            if prof_dismiss:
+                controller.click_element(prof_dismiss[0])
+                time.sleep(1.5)
+                continue
+
+            # If we are on CHATS_PAGE (e.g. after backing out to force sync), re-open My AI row
+            in_chat = bool(
+                cur_xml.get_elements_by_id("com.snapchat.android:id/chat_message_list")
+                or cur_xml.get_elements_by_id("com.snapchat.android:id/chat_input_text_field")
+            )
+            if cur_xml.children and not in_chat:
+                ai_nodes = [
+                    n for n in cur_xml.get_elements_by_text("My AI")
+                    if n.center.y > 250
+                ]
+                if ai_nodes:
+                    controller.click(Point(420, ai_nodes[0].center.y))
+                    time.sleep(2.5)
+                    continue
+
             cur_responses = extract_ai_responses(cur_xml)
             if cur_responses:
                 latest = cur_responses[-1]
@@ -180,10 +203,10 @@ class SendMessageToAiAction(BaseAction):
             # If the real-time websocket hasn't pushed the reply or typing animation is blocking
             # uiautomator dump, tap the top-left chat Back button (62, 147) to return to
             # CHATS_PAGE and re-open the My AI row (y > 250) to force HTTP sync.
-            if poll_idx in (4, 9) or empty_xml_streak >= 2:
+            if (in_chat and poll_idx in (5, 10)) or empty_xml_streak >= 2:
                 empty_xml_streak = 0
                 controller.click(Point(62, 147))
-                time.sleep(1.8)
+                time.sleep(2.2)
                 sync_xml = controller.fetch_xml(max_retries=2)
                 prof_dismiss = sync_xml.get_elements_by_id("unified_profile_dismiss_button")
                 if prof_dismiss:
@@ -196,10 +219,10 @@ class SendMessageToAiAction(BaseAction):
                 ]
                 if ai_nodes:
                     controller.click(Point(420, ai_nodes[0].center.y))
-                    time.sleep(2.2)
+                    time.sleep(2.5)
                 continue
             # Scroll down the message list if the new AI response is below the fold
-            if poll_idx % 3 == 0:
+            if in_chat and poll_idx % 3 == 0:
                 controller.swipe(Point(540, 1100), Point(540, 450), duration_ms=300)
 
         if not ai_reply and last_candidate:

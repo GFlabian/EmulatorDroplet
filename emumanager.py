@@ -940,7 +940,7 @@ class EmulatorManager:
         remote_tar = f"/data/local/tmp/{session_name}_out.tar"
         tar_script = (
             f"if [ ! -d /data/data/{SNAPCHAT_PACKAGE} ]; then echo MISSING_DIR; exit 1; fi; "
-            f"am force-stop {SNAPCHAT_PACKAGE}; sync; "
+            f"input keyevent 3; sleep 1; sync; "
             f"rm -f {remote_tar}; "
             f"tar -cf {remote_tar} -C /data/data "
             f"--exclude='{SNAPCHAT_PACKAGE}/lib' "
@@ -961,11 +961,6 @@ class EmulatorManager:
                 on_status("Pulling session archive from emulator...")
             pull_out = self.adb(name, "pull", remote_tar, str(local_tar), timeout=timeout)
             self.adb(name, "shell", f"rm -f {remote_tar}", timeout=30)
-            # Relaunch Snapchat immediately so the phone returns to MAIN_PAGE while we compress & upload
-            try:
-                self.start_app(name, SNAPCHAT_PACKAGE)
-            except Exception:
-                pass
             if not local_tar.is_file() or local_tar.stat().st_size == 0:
                 raise EmulatorError(f"pulling session tar from {name} failed: {pull_out}")
 

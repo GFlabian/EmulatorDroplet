@@ -85,6 +85,8 @@ class PagesService:
 
             unknown_streak = 0
             self._last_detected_page = detected_page
+            if detected_page.name != "SystemAnrDialogPage":
+                ctx["_anr_count"] = 0
             controller.log_event(
                 level="INFO",
                 event_type="PAGE_MATCHED",
