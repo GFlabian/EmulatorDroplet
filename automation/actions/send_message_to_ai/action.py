@@ -178,13 +178,22 @@ class SendMessageToAiAction(BaseAction):
             if last_candidate:
                 ai_reply = last_candidate
                 break
-            # If the real-time websocket hasn't pushed the reply after ~10s (e.g. when multiple
-            # devices share the same account), back out to CHATS_PAGE and re-open My AI to force HTTP sync.
-            if poll_idx in (5, 12):
-                controller.send_key(KeyType.BACK)
-                time.sleep(1.5)
+            # If the real-time websocket hasn't pushed the reply after ~8s (e.g. when multiple
+            # devices share the same account), tap the top-left chat Back button (62, 147) to
+            # return to CHATS_PAGE and re-open the My AI row (y > 250) to force HTTP sync.
+            if poll_idx in (4, 9):
+                controller.click(Point(62, 147))
+                time.sleep(1.6)
                 sync_xml = controller.fetch_xml()
-                ai_nodes = sync_xml.get_elements_by_text("My AI")
+                prof_dismiss = sync_xml.get_elements_by_id("unified_profile_dismiss_button")
+                if prof_dismiss:
+                    controller.click_element(prof_dismiss[0])
+                    time.sleep(1.5)
+                    continue
+                ai_nodes = [
+                    n for n in sync_xml.get_elements_by_text("My AI")
+                    if n.center.y > 250
+                ]
                 if ai_nodes:
                     controller.click(Point(420, ai_nodes[0].center.y))
                     time.sleep(2.2)
