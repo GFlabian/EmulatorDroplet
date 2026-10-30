@@ -10,6 +10,7 @@ from automation.actions.add_friend.rules import (
     make_search_empty_rule,
     make_search_has_add_button_rule,
     make_search_needs_clear_rule,
+    make_search_no_results_yet_rule,
     make_search_retry_results_rule,
     make_search_view_all_results_rule,
     make_user_added_final_rule,
@@ -38,26 +39,31 @@ class MainCameraOpenSearchPage(XmlPage):
 
 
 class SearchClearPreviousPage(XmlPage):
-    """Clears previous search query when starting directly from USER_ADDED_PAGE or SEARCH_PAGE."""
+    """Clears previous search query and immediately types target_username in one step."""
 
     def __init__(self, target_username: str):
         super().__init__(make_search_needs_clear_rule(target_username))
+        self.target_username = target_username
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
-        controller.report_status("Clearing previous search query...")
+        controller.report_status(f"Clearing and searching for {self.target_username}...")
         clear_btns = xml.get_elements_by_id("clear-button")
         if clear_btns:
             controller.click_element(clear_btns[0])
+            time.sleep(0.6)
+            controller.keyboard(self.target_username)
             controller.set_location(Location.SEARCH_PAGE)
-            time.sleep(0.8)
+            time.sleep(2.0)
             return
         tfs = xml.get_elements_by_id("search-textfield")
         if tfs:
             controller.click_element(tfs[0])
             time.sleep(0.3)
             controller.clear_text(35)
+            time.sleep(0.3)
+            controller.keyboard(self.target_username)
             controller.set_location(Location.SEARCH_PAGE)
-            time.sleep(0.6)
+            time.sleep(2.0)
 
 
 class SearchTypeUsernamePage(XmlPage):
@@ -206,6 +212,22 @@ class ProfileSheetAddFinalPage(XmlPage):
             controller.click(Point(78, 136))
         controller.set_location(Location.USER_ADDED_PAGE)
         time.sleep(1.2)
+
+
+class SearchWaitOrNotFoundPage(XmlPage):
+    """Waits briefly for search results to load; if still no Add button after 2 checks (~8-10s), raises USER_NOT_FOUND."""
+
+    def __init__(self, target_username: str):
+        super().__init__(make_search_no_results_yet_rule(target_username))
+        self.target_username = target_username
+
+    def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        polls = int(context.get("_no_result_polls", 0)) + 1
+        context["_no_result_polls"] = polls
+        if polls >= 2:
+            raise AutomationError("USER_NOT_FOUND", f"No Add button found in search results for {self.target_username}")
+        controller.report_status(f"Waiting for search results for {self.target_username}...")
+        time.sleep(2.0)
 
 
 class UserAddedFinalPage(XmlPage):

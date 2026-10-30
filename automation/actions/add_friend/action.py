@@ -11,6 +11,7 @@ from automation.actions.add_friend.pages import (
     SearchRetryResultsPage,
     SearchTypeUsernamePage,
     SearchViewAllResultsPage,
+    SearchWaitOrNotFoundPage,
     UserAddedFinalPage,
 )
 from automation.actions.base_action import BaseAction
@@ -46,6 +47,7 @@ class AddFriendAction(BaseAction):
             SearchClickAddUserPage(username),
             SearchViewAllResultsPage(username),
             SearchRetryResultsPage(username),
+            SearchWaitOrNotFoundPage(username),
         ]
         final_pages = [
             UserAddedFinalPage(username),
