@@ -63,7 +63,6 @@ class SendMessageToAiAction(BaseAction):
     allowed_start_locations = (
         Location.MAIN_PAGE,
         Location.CHATS_PAGE,
-        Location.AI_CHAT_PAGE,
     )
 
     def run(self, controller: PhoneController, params: dict[str, Any]) -> ActionResult:
@@ -79,7 +78,16 @@ class SendMessageToAiAction(BaseAction):
 
         response_timeout = float(params.get("timeout", 60.0))
 
-        # Navigate to My AI chat screen
+        # If the phone resumed directly inside an existing AI_CHAT_PAGE fragment after
+        # KEYCODE_HOME, Snapchat's Composer/Valdi accessibility bridge may not export
+        # plugin_content_holder (chat_bot_response_message). Back out to CHATS_PAGE
+        # first so ChatsListOpenMyAiPage mounts a fresh AI_CHAT_PAGE fragment.
+        initial_xml = controller.fetch_xml(max_retries=1)
+        if AiChatReadyFinalPage().matches(initial_xml):
+            controller.click(Point(62, 147))
+            time.sleep(2.5)
+
+        # Navigate to My AI chat screen freshly from MAIN_PAGE / CHATS_PAGE
         service = PagesService(
             pages=[
                 *COMMON_POPUP_PAGES,
@@ -138,22 +146,16 @@ class SendMessageToAiAction(BaseAction):
                 controller.send_key(KeyType.ENTER)
                 time.sleep(1.0)
 
-        # Poll for the AI's new response
+        # Poll for the AI's new response without backgrounding the app
         controller.report_status("Waiting for My AI response...")
         poll_start = time.monotonic()
         deadline = poll_start + response_timeout
         ai_reply: Optional[str] = None
         last_candidate: Optional[str] = None
         poll_idx = 0
-        did_second_sync = False
+        did_chat_reenter = False
 
-        # Wait ~7s for My AI to generate its reply on the server, then do ONE clean
-        # pause & resume of LandingPageActivity so the stuck typing animation stops
-        # and RecyclerView mounts all plugin_content_holder response bubbles.
-        time.sleep(7.0)
-        controller.park_in_background()
-        time.sleep(2.5)
-        controller.ensure_app_foreground(wait_seconds=7.0)
+        time.sleep(3.5)
 
         while time.monotonic() < deadline:
             poll_idx += 1
@@ -185,7 +187,7 @@ class SendMessageToAiAction(BaseAction):
                 ]
                 if ai_nodes:
                     controller.click(Point(420, ai_nodes[0].center.y))
-                    time.sleep(5.0)
+                    time.sleep(4.5)
                     continue
                 chat_tabs = cur_xml.get_elements_by_id("com.snapchat.android:id/ngs_chat_icon_container")
                 if chat_tabs:
@@ -217,13 +219,22 @@ class SendMessageToAiAction(BaseAction):
                 ai_reply = last_candidate
                 break
 
-            # Only if 28s have elapsed and plugin_content_holder still hasn't mounted,
-            # do one more pause & resume and leave it undisturbed in the foreground.
-            if not did_second_sync and (time.monotonic() - poll_start >= 28.0):
-                did_second_sync = True
-                controller.park_in_background()
+            # Fallback: if 22s have elapsed and the new reply bubble hasn't mounted yet,
+            # back out to CHATS_PAGE via top-left Back button and re-open My AI once.
+            if not did_chat_reenter and (time.monotonic() - poll_start >= 22.0):
+                did_chat_reenter = True
+                controller.click(Point(62, 147))
                 time.sleep(2.5)
-                controller.ensure_app_foreground(wait_seconds=8.0)
+                chats_xml = controller.fetch_xml(max_retries=1)
+                ai_nodes = [
+                    n for n in chats_xml.get_elements_by_text("My AI")
+                    if n.center.y > 250
+                ]
+                if ai_nodes:
+                    controller.click(Point(420, ai_nodes[0].center.y))
+                else:
+                    controller.click(Point(420, 450))
+                time.sleep(4.5)
                 continue
 
             time.sleep(3.0)
@@ -234,7 +245,10 @@ class SendMessageToAiAction(BaseAction):
         if not ai_reply:
             raise AutomationError("AI_RESPONSE_TIMEOUT", "Timed out waiting for My AI to reply")
 
-        controller.set_location(Location.AI_CHAT_PAGE)
+        # Leave AI_CHAT_PAGE back to CHATS_PAGE before parking in background
+        controller.click(Point(62, 147))
+        time.sleep(1.5)
+        controller.set_location(Location.CHATS_PAGE)
         return ActionResult(
             status=self.success_status,
             error=None,
@@ -242,5 +256,5 @@ class SendMessageToAiAction(BaseAction):
                 "question": question,
                 "response": ai_reply,
             },
-            location=Location.AI_CHAT_PAGE,
+            location=Location.CHATS_PAGE,
         )
