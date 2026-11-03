@@ -43,9 +43,8 @@ class CreateEmulatorRequest(BaseModel):
         min_length=1,
         description="Direct download URL (or local path) for the APK",
     )
-    username: str = Field(..., min_length=1, description="Snapchat username whose session to load")
-    android: int = Field(default=16, description="Android version: 14, 15, or 16")
-    profile: str = Field(default="a52s", min_length=1, description="Saved device profile name (e.g. a52s)")
+    username: str = Field(..., min_length=1, description="Snapchat username whose session and DB device to load")
+    android: Optional[int] = Field(default=None, description="Optional Android version override (default: from DB Auth)")
     proxy: Optional[str] = Field(
         default="68.183.65.77:37219:geelark:67016a3f075ce9d73f",
         description="Optional proxy host:port or host:port:user:pass",
@@ -180,21 +179,14 @@ class EmulatorRegistry:
     def create_async(self, req: CreateEmulatorRequest) -> dict:
         apk = req.apk.strip()
         username = req.username.strip()
-        profile = req.profile.strip()
         proxy = req.proxy.strip() if req.proxy and req.proxy.strip() else None
 
-        if not apk or not username or not profile:
-            raise HTTPException(status_code=400, detail="apk, username, android, and profile are mandatory")
-        if req.android not in ANDROID_IMAGES:
+        if not apk or not username:
+            raise HTTPException(status_code=400, detail="apk and username are mandatory")
+        if req.android is not None and req.android not in ANDROID_IMAGES:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported android version {req.android!r}. Must be one of {sorted(ANDROID_IMAGES)}",
-            )
-        available_profiles = self.manager.list_profiles()
-        if profile not in available_profiles:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Profile {profile!r} not found. Available profiles: {available_profiles}",
             )
         if proxy:
             from emumanager import _proxy_url
@@ -212,8 +204,8 @@ class EmulatorRegistry:
                 "id": emu_id,
                 "name": avd_name,
                 "serial": None,
-                "android": req.android,
-                "profile": profile,
+                "android": req.android or 14,
+                "profile": "DB Auth",
                 "username": username,
                 "apk": apk,
                 "proxy": proxy,
@@ -239,9 +231,9 @@ class EmulatorRegistry:
             level="INFO",
             event_type="LIFECYCLE",
             location=Location.INITIALIZING,
-            message=f"Creating emulator {avd_name} (Android {req.android}, profile {profile})",
+            message=f"Creating emulator {avd_name} for {username} (DB Auth device)",
         )
-        thread = threading.Thread(target=self._run_create, args=(emu_id,), daemon=True)
+        thread = threading.Thread(target=self._run_create, args=(emu_id, req.android), daemon=True)
         thread.start()
         return self._serialize(record)
 
@@ -251,6 +243,11 @@ class EmulatorRegistry:
             if not rec or rec["deleted"] or emu_id in self._delete_flags:
                 raise EmulatorError("DELETE_REQUESTED")
             rec["status"] = status
+            st = self.manager._state(rec["name"])
+            if st.get("profile"):
+                rec["profile"] = st["profile"]
+            if st.get("android"):
+                rec["android"] = int(st["android"])
             serial = self.manager.serial(rec["name"])
             if serial:
                 rec["serial"] = serial
@@ -290,14 +287,12 @@ class EmulatorRegistry:
                 ctrl.emulator_id = emu_id
             return ctrl
 
-    def _run_create(self, emu_id: str):
+    def _run_create(self, emu_id: str, android_override: Optional[int] = None):
         with self._lock:
             rec = self._records[emu_id]
             avd_name = rec["name"]
             apk = rec["apk"]
             username = rec["username"]
-            android = rec["android"]
-            profile = rec["profile"]
             proxy = rec["proxy"]
             headless = rec["headless"]
 
@@ -306,16 +301,20 @@ class EmulatorRegistry:
                 avd_name,
                 apk=apk,
                 username=username,
-                android=android,
-                profile=profile,
+                android=android_override,
                 proxy=proxy,
                 headless=headless,
                 on_status=lambda st: self._set_status(emu_id, st),
             )
+            st = self.manager._state(avd_name)
             with self._lock:
                 if emu_id in self._delete_flags or rec["deleted"]:
                     need_cleanup = True
                 else:
+                    if st.get("profile"):
+                        rec["profile"] = st["profile"]
+                    if st.get("android"):
+                        rec["android"] = int(st["android"])
                     rec["serial"] = dev.serial
                     rec["location"] = Location.MAIN_PAGE
                     rec["action"] = "IDLE"
@@ -825,7 +824,6 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
 def get_meta():
     cached = sorted(p.name for p in emu_manager.apks_dir.glob("*.apk")) if emu_manager.apks_dir.is_dir() else []
     return {
-        "profiles": emu_manager.list_profiles(),
         "android_versions": sorted(ANDROID_IMAGES.keys(), reverse=True),
         "cached_apks": cached,
         "actions": list_supported_actions(),
@@ -1315,20 +1313,6 @@ UI_HTML = """<!DOCTYPE html>
             <input type="text" id="username" placeholder="e.g. rachelt8687" required />
           </div>
           <div class="field">
-            <label>Android Version <span class="req">*</span></label>
-            <select id="android" required>
-              <option value="16" selected>Android 16</option>
-              <option value="15">Android 15</option>
-              <option value="14">Android 14</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Device Profile <span class="req">*</span></label>
-            <select id="profile" required>
-              <option value="a52s" selected>a52s</option>
-            </select>
-          </div>
-          <div class="field">
             <label>Proxy (Optional)</label>
             <input type="text" id="proxy" value="68.183.65.77:37219:geelark:67016a3f075ce9d73f" placeholder="host:port[:user:pass]" />
           </div>
@@ -1378,14 +1362,6 @@ UI_HTML = """<!DOCTYPE html>
         const res = await fetch('/api/meta');
         if (!res.ok) return;
         const data = await res.json();
-        const profileSelect = document.getElementById('profile');
-        if (data.profiles && data.profiles.length > 0) {
-          const current = profileSelect.value;
-          profileSelect.innerHTML = data.profiles
-            .map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
-            .join('');
-          if (data.profiles.includes(current)) profileSelect.value = current;
-        }
         const metaEl = document.getElementById('meta-info');
         metaEl.textContent = `Cached APKs: ${data.cached_apks ? data.cached_apks.length : 0}`;
       } catch (e) {}
@@ -1407,8 +1383,6 @@ UI_HTML = """<!DOCTYPE html>
       const payload = {
         apk: document.getElementById('apk').value.trim(),
         username: document.getElementById('username').value.trim(),
-        android: parseInt(document.getElementById('android').value, 10),
-        profile: document.getElementById('profile').value,
         proxy: document.getElementById('proxy').value.trim() || null,
         headless: document.getElementById('headless').checked,
       };

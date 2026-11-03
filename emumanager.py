@@ -67,7 +67,12 @@ from botocore.client import Config
 from botocore.exceptions import ClientError
 import py7zr
 
-from session_generator import CodecException, generate_session_from_db
+from session_generator import (
+    AccountAuthData,
+    CodecException,
+    generate_session_from_db,
+    resolve_account_device_from_db,
+)
 
 HERE = Path(__file__).resolve().parent
 _default_sdk_fallback = Path("/opt/android-sdk") if (not IS_WINDOWS and Path("/opt/android-sdk").exists()) else (HERE.parent / "LightWeight")
@@ -78,7 +83,6 @@ DEFAULT_SDK = Path(
     or _default_sdk_fallback
 )
 DEFAULT_AVD_HOME = Path(os.environ.get("EMU_AVD_HOME") or os.environ.get("ANDROID_AVD_HOME") or (HERE / "avds"))
-PROFILES_DIR = Path(os.environ.get("EMU_PROFILES", HERE / "profiles"))
 APKS_DIR = Path(os.environ.get("EMU_APKS_DIR", HERE / "apks"))
 # Android 16 QPR2: its ARM translator runs ARM-only apps that crash on the Android 14 image
 DEFAULT_IMAGE = "android-36.1/google_apis/x86_64"
@@ -136,16 +140,6 @@ PROP_TARGET_UPPER = "/mnt/scratch/overlay/product/upper/etc/build.prop"
 # adb offline. So it is only ever raised, never lowered.
 PATCH_PROP = "ro.build.version.security_patch"
 
-# Properties captured into a profile from a real device. Deliberately excludes
-# ro.build.type / ro.debuggable / ro.secure (which would turn off `adb root` and lock the
-# device) and ro.build.version.release|sdk (changing these on a different base breaks apps).
-CAPTURE_PROP_RE = re.compile(
-    r"^ro\.("
-    r"product\.([a-z_]+\.)?(model|brand|manufacturer|device|name)"
-    r"|build\.(fingerprint|id|display\.id|tags|flavor|product|characteristics"
-    r"|version\.(incremental|security_patch))"
-    r"|(system|system_ext|vendor|odm|product|bootimage)\.build\.fingerprint"
-    r"|product\.board|board\.platform|soc\.(manufacturer|model))$")
 
 class EmulatorError(RuntimeError):
     pass
@@ -450,11 +444,10 @@ class Device(str):
 
 
 class EmulatorManager:
-    def __init__(self, sdk_root=DEFAULT_SDK, avd_home=DEFAULT_AVD_HOME, profiles_dir=PROFILES_DIR,
+    def __init__(self, sdk_root=DEFAULT_SDK, avd_home=DEFAULT_AVD_HOME,
                  apks_dir=APKS_DIR, verbose=False):
         self.sdk_root = Path(sdk_root)
         self.avd_home = Path(avd_home)
-        self.profiles_dir = Path(profiles_dir)
         self.apks_dir = Path(apks_dir)
         self.verbose = verbose
         self._baking = set()
@@ -500,57 +493,27 @@ class EmulatorManager:
             except Exception:
                 pass
 
-    # ---- profiles ------------------------------------------------------------
-
-    def list_profiles(self):
-        """Names of saved device profiles."""
-        return sorted(p.stem for p in self.profiles_dir.glob("*.json")) if self.profiles_dir.is_dir() else []
-
-    def load_profile(self, name):
-        path = self.profiles_dir / f"{name}.json"
-        if not path.is_file():
-            raise EmulatorError(f"no profile {name!r} in {self.profiles_dir}; have: "
-                                f"{', '.join(self.list_profiles()) or 'none'}")
-        return json.loads(path.read_text(encoding="utf-8"))
-
-    def save_profile(self, name, data):
-        self.profiles_dir.mkdir(parents=True, exist_ok=True)
-        (self.profiles_dir / f"{name}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
-        return name
-
-    def capture_profile(self, serial, name, description=None):
-        """Read a connected device (any adb serial, e.g. a USB phone) into a profile file."""
-        raw = self._run_adb("-s", serial, "shell", "getprop", timeout=30)
-        if raw.returncode != 0:
-            raise EmulatorError(f"cannot read {serial}: {(raw.stderr or raw.stdout).strip()}")
-        found = dict(re.findall(r"^\[([^\]]+)\]: \[(.*)\]$", raw.stdout, re.M))
-        props = {k: found[k] for k in sorted(found) if CAPTURE_PROP_RE.match(k) and found[k]}
-        if not props:
-            raise EmulatorError(f"{serial} returned no recognizable build properties")
-        hardware = {}
-        size = self._run_adb("-s", serial, "shell", "wm", "size", timeout=15).stdout
-        if m := re.search(r"Physical size:\s*(\d+)x(\d+)", size):
-            hardware["width"], hardware["height"] = int(m[1]), int(m[2])
-        dens = self._run_adb("-s", serial, "shell", "wm", "density", timeout=15).stdout
-        if m := re.search(r"Physical density:\s*(\d+)", dens):
-            hardware["density"] = int(m[1])
-        data = {
-            "name": name,
-            "description": description or (f"{found.get('ro.product.manufacturer', '')} "
-                                           f"{found.get('ro.product.model', serial)}".strip()),
-            "captured": datetime.date.today().isoformat(), "source_serial": serial,
-            "hardware": hardware, "props": props,
-        }
-        self.save_profile(name, data)
-        self._log(f"captured profile {name!r} from {serial}: {len(props)} props, {hardware or 'no screen info'}")
-        return data
-
     # ---- queries -------------------------------------------------------------
 
     def images(self):
         """Installed system images, e.g. 'android-36.1/google_apis/x86_64'."""
         root = self.sdk_root / "system-images"
         return sorted("/".join(p.parent.relative_to(root).parts) for p in root.glob("*/*/*/source.properties"))
+
+    def _pick_installed_android(self, preferred: int) -> int:
+        """Return preferred Android version (14, 15, 16) if its system image is installed,
+        else fall back to an installed Android image on this host.
+        """
+        installed = set(self.images())
+        if preferred in ANDROID_IMAGES and ANDROID_IMAGES[preferred] in installed:
+            return preferred
+        for candidate in (16, 15, 14):
+            if ANDROID_IMAGES[candidate] in installed:
+                self._log(
+                    f"requested Android {preferred} image not installed; falling back to installed Android {candidate}"
+                )
+                return candidate
+        return preferred if preferred in ANDROID_IMAGES else 16
 
     def avds(self):
         """Names of the emulators managed here."""
@@ -570,19 +533,18 @@ class EmulatorManager:
             st = self._state(n)
             rows.append({"name": n, "image": st.get("image", "?"), "serial": self.serial(n),
                          "profile": st.get("profile", ""),
+                         "android": st.get("android", 16),
                          "pending": bool(st.get("pending_props"))})
         return rows
 
     # ---- lifecycle -----------------------------------------------------------
 
     def spawn(self, name=None, *, model=None, brand=None, manufacturer=None, device=None, product=None,
-              build_id=None, fingerprint=None, props=None, profile=None, width=None, height=None,
+              build_id=None, fingerprint=None, props=None, width=None, height=None,
               density=None, ram_mb=None, cores=None, android=None, image=None, apk=None,
               username=None, headless=False, slim=True, timeout=600, proxy=None, on_status=None):
-        """Create an emulator, boot it, install apk (URL or path), load session, and start Snapchat.
-
-        apk, username, android, and profile are mandatory.
-        apk can be a direct download URL (cached in ./apks) or a local file path.
+        """Create an emulator configured with username's DB Auth device, boot it, install apk,
+        load Snapchat session, and start Snapchat.
         """
         def report(msg):
             if on_status is not None:
@@ -590,25 +552,50 @@ class EmulatorManager:
 
         apks = [apk] if isinstance(apk, (str, Path)) else list(apk or ())
         apks = [a for a in apks if a is not None and str(a).strip()]
-        missing = [flag for flag, val in (("apk", apks), ("username", username and str(username).strip()),
-                                          ("android", android), ("profile", profile)) if not val]
+        clean_user = str(username).strip() if username else ""
+        missing = [flag for flag, val in (("apk", apks), ("username", clean_user)) if not val]
         if missing:
             raise EmulatorError(f"missing mandatory parameter(s): {', '.join(missing)}")
+
+        report(f"Resolving account device from DB ({clean_user})")
+        try:
+            db_cfg = resolve_account_device_from_db(clean_user)
+        except Exception as e:
+            raise EmulatorError(f"failed resolving DB Auth device for {clean_user!r}: {e}") from e
+
         resolved_apks = [self.resolve_apk(a, on_status=on_status) for a in apks]
         named = {"model": model, "brand": brand, "manufacturer": manufacturer, "device": device,
                  "product": product, "build_id": build_id, "fingerprint": fingerprint}
-        wanted = {**(props or {}), **{k: v for k, v in named.items() if v is not None}}
-        report("Creating AVD")
-        name = self.create(name, image, ram_mb, width, height, density, cores, profile=profile, props=wanted,
-                           android=android)
+        wanted = {**db_cfg.props, **(props or {}), **{k: v for k, v in named.items() if v is not None}}
+        target_android = int(android) if android in ANDROID_IMAGES else db_cfg.android
+        resolved_android = self._pick_installed_android(target_android) if image is None else None
+        device_label = db_cfg.device_label
+
+        report(f"Creating AVD ({device_label}, Android {resolved_android or target_android})")
+        name = self.create(
+            name,
+            image=image,
+            ram_mb=ram_mb,
+            width=width,
+            height=height,
+            density=density,
+            cores=cores,
+            props=wanted,
+            android=resolved_android,
+            device_label=device_label,
+        )
         try:
             self.start(name, headless=headless, timeout=timeout, slim=slim, proxy=proxy, on_status=on_status)
+            if db_cfg.android_id:
+                try:
+                    self.adb(name, "shell", f"settings put secure android_id {_sh_quote(db_cfg.android_id)}", timeout=15)
+                except Exception:
+                    pass
             for path in resolved_apks:
                 report(f"Installing {Path(path).name} & granting permissions")
                 self.install(name, path)
-            if username:
-                report(f"Loading Snapchat session ({username})")
-                self.load_snapchat_session(name, username, on_status=on_status)
+            report(f"Loading Snapchat session ({clean_user})")
+            self.load_snapchat_session(name, clean_user, on_status=on_status, auth=db_cfg.auth)
             report("Opening Snapchat")
             self.start_app(name, SNAPCHAT_PACKAGE)
             time.sleep(12)
@@ -618,11 +605,7 @@ class EmulatorManager:
         return Device(self, name)
 
     def spawn_many(self, count, **options):
-        """spawn() count emulators at once (same options, names emuN); returns their Devices.
-
-        They boot in parallel, so this takes about as long as one spawn, but each needs its
-        RAM (2.5 GB by default). If any fails, the others are kept and the error is raised.
-        """
+        """spawn() count emulators at once (same options, names emuN); returns their Devices."""
         if options.get("name"):
             raise EmulatorError("spawn_many names emulators itself; don't pass name")
         with concurrent.futures.ThreadPoolExecutor(count) as pool:
@@ -638,32 +621,30 @@ class EmulatorManager:
         return [Device(self, n) for n in self.avds()]
 
     def create(self, name=None, image=None, ram_mb=None, width=None, height=None,
-               density=None, cores=None, data_gb=6, profile=None, props=None, android=None):
+               density=None, cores=None, data_gb=6, props=None, android=None, device_label=None):
         """Create a new emulator (without starting it) and return its name.
 
-        props maps PROP_ALIASES names or full property names to values; profile is a
-        profile name (or a loaded dict) whose screen and props are used unless overridden.
+        props maps PROP_ALIASES names or full property names to values.
         android selects Android 14, 15 or 16 (default 16).
         The props are baked in on the first start, so later starts never re-inject.
         """
         if android is not None and image is not None:
             raise EmulatorError("pass either android or image, not both")
+        resolved_android = int(android) if android is not None else 16
         if android is not None:
             try:
-                image = ANDROID_IMAGES[int(android)]
+                image = ANDROID_IMAGES[resolved_android]
             except (ValueError, KeyError):
                 raise EmulatorError(f"unsupported Android version {android!r} (choose 14, 15 or 16)")
         if image is None:
             image = DEFAULT_IMAGE
-        prof = self.load_profile(profile) if isinstance(profile, str) else profile
-        hw = (prof or {}).get("hardware", {})
-        width = width if width is not None else hw.get("width", 720)
-        height = height if height is not None else hw.get("height", 1600)
-        density = density if density is not None else hw.get("density", 280)
-        ram_mb = ram_mb if ram_mb is not None else hw.get("ram", 2560)
-        cores = cores if cores is not None else hw.get("cores", 4)
+        width = width if width is not None else 1080
+        height = height if height is not None else 2400
+        density = density if density is not None else 450
+        ram_mb = ram_mb if ram_mb is not None else 2560
+        cores = cores if cores is not None else 4
         img = self._resolve_image(image)
-        props_wanted = self._normalize_props({**(prof or {}).get("props", {}), **(props or {})})
+        props_wanted = self._normalize_props(props or {})
         source = _read_props(img / "source.properties")
         target = f"android-{source['AndroidVersion.ApiLevel']}"
         abi = source.get("SystemImage.Abi", img.name)
@@ -691,16 +672,21 @@ class EmulatorManager:
             (avd_dir / "config.ini").write_text("".join(f"{k}={v}\n" for k, v in config.items()), encoding="utf-8")
             (self.avd_home / f"{name}.ini").write_text(
                 f"avd.ini.encoding=UTF-8\npath={avd_dir}\ntarget={target}\n", encoding="utf-8")
-        state = {"image": "/".join(img.relative_to(self.sdk_root / "system-images").parts)}
+        label = device_label or (
+            f"{props_wanted.get('ro.product.brand', '')} {props_wanted.get('ro.product.model', '')}".strip()
+        ) or "db"
+        state = {
+            "image": "/".join(img.relative_to(self.sdk_root / "system-images").parts),
+            "android": resolved_android,
+            "profile": label,
+        }
         note = ""
         if props_wanted and (img / "build.prop").is_file():
             self._keep_patch_level(name, props_wanted, _read_props(img / "build.prop").get(PATCH_PROP))
         if props_wanted:
             state["pending_props"] = props_wanted
             state["writable_system"] = True   # must be set at launch; baking needs it
-            if prof:
-                state["profile"] = prof.get("name", profile if isinstance(profile, str) else "custom")
-            note = f", {len(props_wanted)} props pending" + (f" (profile {state['profile']})" if prof else "")
+            note = f", {len(props_wanted)} props pending ({label})"
         self._save_state(name, **state)
         self._log(f"{name}: created ({target}, {width}x{height}, {ram_mb} MB RAM{note})")
         return name
@@ -981,6 +967,7 @@ class EmulatorManager:
         timeout: int = 300,
         on_status: Callable[[str], None] | None = None,
         app_version: str | None = None,
+        auth: AccountAuthData | None = None,
     ) -> None:
         """Download username's Snapchat session from object storage into /data/data/com.snapchat.android.
         Falls back to generating the session from DB Auth if the session archive is missing in storage.
@@ -1035,6 +1022,7 @@ class EmulatorManager:
                         username=session_name,
                         output_dir=extract_dir,
                         app_version=detected_ver,
+                        auth=auth,
                     )
                     generated_from_auth = True
                 except CodecException as e:
@@ -1269,21 +1257,16 @@ class EmulatorManager:
         found = dict(re.findall(r"^\[([^\]]+)\]: \[(.*)\]$", self.adb(name, "shell", "getprop"), re.M))
         return {k: found.get(k, "") for k in keys}
 
-    def set_props(self, name, props=None, profile=None, timeout=300):
+    def set_props(self, name, props=None, timeout=300):
         """Permanently change read-only build properties such as model, brand or build ID.
 
         props maps PROP_ALIASES names or full property names to values, e.g.
-        {"model": "X1", "brand": "acme", "ro.product.board": "x1"}. profile names a saved
-        profile whose props are applied first (props then override it). The emulator is
+        {"model": "X1", "brand": "acme", "ro.product.board": "x1"}. The emulator is
         (re)started with a writable system, edited, rebooted, and left in the state it was
         in before. Returns the values Android reports afterwards.
         """
         self._require(name)
-        merged = {}
-        if profile is not None:
-            merged.update((self.load_profile(profile) if isinstance(profile, str) else profile).get("props", {}))
-        merged.update(props or {})
-        changes = self._normalize_props(merged)
+        changes = self._normalize_props(props or {})
         if not changes:
             return {}
         was_running = self.is_running(name)
@@ -1504,32 +1487,24 @@ def main(argv=None):
 
     sub.add_parser("images", help="list installed system images")
     sub.add_parser("list", help="list emulators and whether they are running")
-    sub.add_parser("profiles", help="list saved device profiles")
 
     p_srv = sub.add_parser("server", help="run the local HTTP API and web UI server")
     p_srv.add_argument("--host", default="127.0.0.1", help="bind host (default 127.0.0.1)")
     p_srv.add_argument("--port", type=int, default=8000, help="bind port (default 8000)")
-
-    p = sub.add_parser("capture-profile", help="snapshot a connected device into a profile")
-    p.add_argument("serial", help="adb serial of the device to read (see `adb devices`)")
-    p.add_argument("--name", help="profile name (default: the device model, lower-cased)")
-    p.add_argument("--desc", help="free-text description stored in the profile")
 
     for cmd, text in (("spawn", "create new emulator(s), boot them and install APKs"),
                       ("create", "create new emulator(s) without starting them")):
         is_spawn = cmd == "spawn"
         p = sub.add_parser(cmd, help=text)
         p.add_argument("name", nargs="?", help="default: emu1, emu2, ...")
-        p.add_argument("--profile", required=is_spawn,
-                       help="stamp with a saved device profile (screen + build props)")
         p.add_argument("--count", type=int, default=1, help="how many (only without a name); they boot in parallel")
-        p.add_argument("--android", type=int, choices=sorted(ANDROID_IMAGES), required=is_spawn,
-                       help="Android version: 14, 15 or 16")
+        p.add_argument("--android", type=int, choices=sorted(ANDROID_IMAGES),
+                       help="optional Android version override (default: resolved from DB Auth)")
         p.add_argument("--image", help=f"system image (default {DEFAULT_IMAGE})")
-        p.add_argument("--ram", type=int, help="RAM in MB (default 2560 / the profile)")
-        p.add_argument("--size", help="screen WIDTHxHEIGHT (default 720x1600 / the profile)")
-        p.add_argument("--density", type=int, help="screen dpi (default 280 / the profile)")
-        p.add_argument("--cores", type=int, help="CPU cores (default 4 / the profile)")
+        p.add_argument("--ram", type=int, help="RAM in MB (default 2560)")
+        p.add_argument("--size", help="screen WIDTHxHEIGHT (default 1080x2400)")
+        p.add_argument("--density", type=int, help="screen dpi (default 450)")
+        p.add_argument("--cores", type=int, help="CPU cores (default 4)")
         prop_options(p)
         if is_spawn:
             run_options(p, required=True)
@@ -1541,7 +1516,6 @@ def main(argv=None):
 
     p = sub.add_parser("props", help="show or change model, brand, build ID, ...")
     p.add_argument("name")
-    p.add_argument("--profile", help="apply a saved profile's properties")
     prop_options(p)
 
     for cmd, text in (("stop", "stop emulator(s)"), ("delete", "stop and delete emulator(s)")):
@@ -1566,23 +1540,11 @@ def main(argv=None):
                 print(f"{row['name']:<16}{row['serial'] or 'stopped':<17}{row['image']:<34}{tag}")
             if not rows:
                 print("no emulators")
-        elif args.cmd == "profiles":
-            for n in emu.list_profiles():
-                prof = emu.load_profile(n)
-                hw = prof.get("hardware", {})
-                dims = f"{hw.get('width', '?')}x{hw.get('height', '?')}@{hw.get('density', '?')}"
-                print(f"{n:<16}{dims:<18}{len(prof.get('props', {}))} props  {prof.get('description', '')}")
-            if not emu.list_profiles():
-                print(f"no profiles in {emu.profiles_dir}")
-        elif args.cmd == "capture-profile":
-            data = emu.capture_profile(args.serial, args.name or _default_profile_name(emu, args.serial), args.desc)
-            print(f"saved profile {data['name']!r}: {data['description']} "
-                  f"({len(data['props'])} props, {data['hardware'] or 'no screen info'})")
         elif args.cmd in ("spawn", "create"):
             if args.name and args.count != 1:
                 raise EmulatorError("--count only works without a name")
             options = {"android": args.android, "image": args.image, "ram_mb": args.ram, "density": args.density,
-                       "cores": args.cores, "profile": args.profile, "props": _cli_props(args)}
+                       "cores": args.cores, "props": _cli_props(args)}
             if args.size:
                 w, h = args.size.lower().split("x")
                 options.update(width=int(w), height=int(h))
@@ -1606,8 +1568,8 @@ def main(argv=None):
             print(f"{args.name} ready on {serial}")
         elif args.cmd == "props":
             changes = _cli_props(args)
-            if changes or args.profile:
-                values = emu.set_props(args.name, changes, profile=args.profile)
+            if changes:
+                values = emu.set_props(args.name, changes)
             else:
                 if not emu.is_running(args.name):
                     raise EmulatorError(f"{args.name} is not running; start it to read its properties")
@@ -1623,12 +1585,6 @@ def main(argv=None):
                 emu.delete(name)
     except (EmulatorError, OSError) as e:
         sys.exit(f"error: {e}")
-
-
-def _default_profile_name(emu, serial):
-    model = emu._run_adb("-s", serial, "shell", "getprop", "ro.product.model", timeout=15).stdout.strip()
-    slug = re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")
-    return slug or serial.lower()
 
 
 def _cli_props(args):

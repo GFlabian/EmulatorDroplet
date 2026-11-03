@@ -49,6 +49,9 @@ class DeviceAuth:
     country_code: str
     model: str
     brand: str
+    version_release: str = "14"
+    version_incremental: str = ""
+    version_sdk: int = 34
 
 
 @dataclass(frozen=True)
@@ -169,8 +172,11 @@ def parse_account_auth(
         app_version=_as_str(sign_target_obj.get("AppVersion")) or "14.30.0.54",
         timezone=_as_str(device_obj.get("Timezone")) or "America/Los_Angeles",
         country_code=_as_str(device_obj.get("AccountCountryCode")) or "US",
-        model=_as_str(device_obj.get("Model")) or "SM-G991B",
+        model=_as_str(device_obj.get("Model")) or "SM-A528B",
         brand=_as_str(device_obj.get("Brand")) or "samsung",
+        version_release=_as_str(device_obj.get("VersionRelease")) or "14",
+        version_incremental=_as_str(device_obj.get("VersionIncremental")),
+        version_sdk=_as_int(device_obj.get("VersionSdk"), default=34),
     )
 
     return AccountAuthData(
