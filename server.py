@@ -740,9 +740,19 @@ def admin_update_worker(req: Optional[WorkerUpdateRequest] = None):
     except Exception as exc:
         git_output = f"git update warning: {exc}"
 
-    # Hot-reload db, emumanager, and automation modules in dependency order
+    # Hot-reload db, session_generator, emumanager, and automation modules in dependency order
     reloaded = []
-    for base_mod in ("db", "emumanager"):
+    for base_mod in (
+        "db",
+        "session_generator.models",
+        "session_generator.crypto",
+        "session_generator.db_auth",
+        "session_generator.base",
+        "session_generator.versions.v14_30",
+        "session_generator.versions",
+        "session_generator",
+        "emumanager",
+    ):
         if base_mod in sys.modules:
             try:
                 importlib.reload(sys.modules[base_mod])

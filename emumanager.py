@@ -59,12 +59,15 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 import py7zr
+
+from session_generator import CodecException, generate_session_from_db
 
 HERE = Path(__file__).resolve().parent
 _default_sdk_fallback = Path("/opt/android-sdk") if (not IS_WINDOWS and Path("/opt/android-sdk").exists()) else (HERE.parent / "LightWeight")
@@ -430,8 +433,8 @@ class Device(str):
     def install(self, apk):
         self.manager.install(self, apk)
 
-    def load_snapchat_session(self, username):
-        self.manager.load_snapchat_session(self, username)
+    def load_snapchat_session(self, username, on_status=None, app_version=None):
+        self.manager.load_snapchat_session(self, username, on_status=on_status, app_version=app_version)
 
     def start_app(self, package=SNAPCHAT_PACKAGE):
         self.manager.start_app(self, package)
@@ -605,7 +608,7 @@ class EmulatorManager:
                 self.install(name, path)
             if username:
                 report(f"Loading Snapchat session ({username})")
-                self.load_snapchat_session(name, username)
+                self.load_snapchat_session(name, username, on_status=on_status)
             report("Opening Snapchat")
             self.start_app(name, SNAPCHAT_PACKAGE)
             time.sleep(12)
@@ -963,8 +966,25 @@ class EmulatorManager:
         out = self.adb(name, "shell", "pm list packages -3", timeout=30)
         return [line.removeprefix("package:").strip() for line in out.splitlines() if line.startswith("package:")]
 
-    def load_snapchat_session(self, name, username, timeout=300):
-        """Download username's Snapchat session from object storage into /data/data/com.snapchat.android."""
+    def _installed_snapchat_version(self, name: str) -> str | None:
+        try:
+            out = self.adb(name, "shell", f"dumpsys package {SNAPCHAT_PACKAGE}", timeout=20)
+            m = re.search(r"versionName=([^\s\r\n]+)", out)
+            return m.group(1).strip() if m else None
+        except Exception:
+            return None
+
+    def load_snapchat_session(
+        self,
+        name: str,
+        username: str,
+        timeout: int = 300,
+        on_status: Callable[[str], None] | None = None,
+        app_version: str | None = None,
+    ) -> None:
+        """Download username's Snapchat session from object storage into /data/data/com.snapchat.android.
+        Falls back to generating the session from DB Auth if the session archive is missing in storage.
+        """
         session_name = username.strip().lower()
         if not session_name:
             raise EmulatorError("username cannot be empty")
@@ -975,9 +995,14 @@ class EmulatorManager:
             raise EmulatorError(f"{name}: {SNAPCHAT_PACKAGE} is not installed (cannot read /data/data/{SNAPCHAT_PACKAGE})")
         user, group, context = parts[2], parts[3], parts[4]
         key = f"{DO_SPACES_PREFIX.strip('/')}/{SNAPCHAT_PACKAGE}/{session_name}.7z"
+        generated_from_auth = False
+        generated_ver = ""
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
             archive_path = tmp / f"{session_name}.7z"
+            extract_dir = tmp / "extracted"
+            extract_dir.mkdir()
+            missing_in_storage = False
             try:
                 s3 = boto3.client(
                     "s3", region_name=DO_SPACES_REGION, endpoint_url=DO_SPACES_ENDPOINT,
@@ -989,14 +1014,38 @@ class EmulatorManager:
                 code = str(e.response.get("Error", {}).get("Code", ""))
                 status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
                 if code in ("404", "NoSuchKey", "NotFound") or status == 404:
-                    raise EmulatorError(f"no Snapchat session in storage for {username!r} ({key})") from e
-                raise EmulatorError(f"downloading Snapchat session {key} failed: {e}") from e
+                    missing_in_storage = True
+                else:
+                    raise EmulatorError(f"downloading Snapchat session {key} failed: {e}") from e
             except Exception as e:
                 raise EmulatorError(f"downloading Snapchat session {key} failed: {e}") from e
-            extract_dir = tmp / "extracted"
-            extract_dir.mkdir()
-            with py7zr.SevenZipFile(archive_path, "r") as zf:
-                zf.extractall(path=extract_dir)
+
+            if not missing_in_storage:
+                with py7zr.SevenZipFile(archive_path, "r") as zf:
+                    zf.extractall(path=extract_dir)
+            else:
+                detected_ver = app_version or self._installed_snapchat_version(name)
+                if on_status is not None:
+                    on_status(f"Session missing in storage; generating from DB Auth ({session_name})")
+                self._log(
+                    f"{name}: no session in storage for {username!r} ({key}); generating from DB Auth (version={detected_ver or 'auto'})"
+                )
+                try:
+                    _pkg_dir, _auth, generated_ver = generate_session_from_db(
+                        username=session_name,
+                        output_dir=extract_dir,
+                        app_version=detected_ver,
+                    )
+                    generated_from_auth = True
+                except CodecException as e:
+                    raise EmulatorError(
+                        f"no Snapchat session in storage for {username!r} ({key}) and DB Auth generation failed ({e})"
+                    ) from e
+                except Exception as e:
+                    raise EmulatorError(
+                        f"no Snapchat session in storage for {username!r} ({key}) and DB Auth generation failed: {e}"
+                    ) from e
+
             tar_path = tmp / f"{session_name}.tar"
             with tarfile.open(tar_path, "w") as tar:
                 for item in extract_dir.iterdir():
@@ -1022,7 +1071,10 @@ class EmulatorManager:
         out = self.adb(name, "shell", script, timeout=timeout)
         if not out.endswith("OK"):
             raise EmulatorError(f"loading Snapchat session on {name} failed: {out}")
-        self._log(f"{name}: loaded Snapchat session for {username!r}")
+        if generated_from_auth:
+            self._log(f"{name}: generated & loaded Snapchat session from DB Auth for {username!r} (v{generated_ver})")
+        else:
+            self._log(f"{name}: loaded Snapchat session for {username!r}")
 
     def save_snapchat_session(self, name, username, timeout=300, on_status=None):
         """Extract /data/data/com.snapchat.android from emulator, compress as .7z, and upload to DigitalOcean Spaces."""
