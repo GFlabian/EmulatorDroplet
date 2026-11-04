@@ -1535,12 +1535,27 @@ class EmulatorManager:
 
     def _reboot(self, name, timeout, on_status=None):
         state = self._state(name)
+        old_boottime = ""
+        try:
+            old_boottime = self.adb(name, "shell", "getprop ro.boottime.init", timeout=10).strip()
+        except Exception:
+            pass
         try:
             self.adb(name, "reboot", timeout=60)
             self.adb(name, "wait-for-disconnect", timeout=120)
         except Exception:
             pass
-        time.sleep(2)
+        time.sleep(3)
+        if old_boottime:
+            wait_reset_deadline = time.monotonic() + 45
+            while time.monotonic() < wait_reset_deadline and self.is_running(name):
+                try:
+                    cur_bt = self.adb(name, "shell", "getprop ro.boottime.init", timeout=8).strip()
+                    if cur_bt and cur_bt != old_boottime:
+                        break
+                except Exception:
+                    break
+                time.sleep(1.5)
         if not self.is_running(name):
             self._log(f"{name}: process exited on reboot; starting back up")
             self.start(name, headless=state.get("headless", True), writable_system=True, wait=False)

@@ -106,8 +106,13 @@ class EmulatorRegistry:
         db_active = {r["name"]: r for r in db.load_active_emulators_db(worker_name_or_id=node)}
         adopted = 0
         for avd_name in list(self.manager.avds()):
-            if self.manager.is_running(avd_name) and avd_name in db_active:
-                rec = db_active[avd_name]
+            rec = db_active.get(avd_name)
+            if (
+                self.manager.is_running(avd_name)
+                and rec is not None
+                and rec.get("action") != "CREATING"
+                and rec.get("location") != Location.INITIALIZING
+            ):
                 emu_id = rec["id"]
                 rec["serial"] = self.manager.serial(avd_name)
                 if rec.get("action") != "IDLE":
