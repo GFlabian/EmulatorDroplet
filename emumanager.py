@@ -667,7 +667,7 @@ class EmulatorManager:
         height = height if height is not None else 2400
         density = density if density is not None else 450
         ram_mb = ram_mb if ram_mb is not None else 3584
-        cores = cores if cores is not None else (4 if IS_WINDOWS else 3)
+        cores = cores if cores is not None else (4 if IS_WINDOWS else 2)
         img = self._resolve_image(image)
         props_wanted = self._normalize_props(props or {})
         source = _read_props(img / "source.properties")
@@ -785,10 +785,19 @@ class EmulatorManager:
                 raise EmulatorError(f"{name} did not finish booting within {timeout}s")
             time.sleep(2)
         self._log(f"{name}: booted")
+        try:
+            self._run_adb(
+                "-s", serial, "shell",
+                "stop tombstoned >/dev/null 2>&1 || true; killall -9 crash_dump64 crash_dump32 2>/dev/null || true",
+                timeout=15,
+            )
+        except Exception:
+            pass
         if slim and not self._state(name).get("slimmed"):
             if on_status is not None:
                 on_status("Configuring system settings")
             script = "; ".join([
+                "stop tombstoned >/dev/null 2>&1 || true",
                 "logcat -G 64K >/dev/null 2>&1 || true",
                 *[f"settings put global {k} 0" for k in
                   ("window_animation_scale", "transition_animation_scale", "animator_duration_scale")],
@@ -798,6 +807,9 @@ class EmulatorManager:
                 "settings put global block_untrusted_touches 0",
                 "cmd appops set com.google.android.gms RUN_IN_BACKGROUND ignore >/dev/null 2>&1 || true",
                 "cmd appops set com.google.android.gms RUN_ANY_IN_BACKGROUND ignore >/dev/null 2>&1 || true",
+                "cmd appops set com.android.vending RUN_IN_BACKGROUND ignore >/dev/null 2>&1 || true",
+                "cmd appops set com.android.vending RUN_ANY_IN_BACKGROUND ignore >/dev/null 2>&1 || true",
+                *[f"pm disable-user --user 0 {p} >/dev/null 2>&1 || true" for p in BLOAT],
             ])
             try:
                 self._run_adb("-s", serial, "shell", script, timeout=60)
@@ -1043,6 +1055,8 @@ class EmulatorManager:
         """Launch an installed app's main launcher activity on a running emulator."""
         if package == SNAPCHAT_PACKAGE:
             script = (
+                "stop tombstoned >/dev/null 2>&1 || true; "
+                "killall -9 crash_dump64 crash_dump32 2>/dev/null || true; "
                 "logcat -G 64K >/dev/null 2>&1 || true; "
                 "am start -a android.intent.action.MAIN "
                 "-c android.intent.category.LAUNCHER "

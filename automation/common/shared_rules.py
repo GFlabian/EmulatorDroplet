@@ -103,6 +103,9 @@ AndroidLauncherRule = XmlPageRule(
         "com.android.launcher3:id/workspace",
         "com.google.android.documentsui",
         "com.android.documentsui",
+        "com.google.android.apps.messaging",
+        "com.android.settings",
+        "com.google.android.gms",
     ],
     exclude=[
         "com.snapchat.android:id/",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Callable, Optional
 import xml.etree.ElementTree as ET
@@ -25,42 +26,50 @@ class PhoneController:
 
     _NULL_ROOT_SIGNATURE = "null root node returned by UiTestAutomationBridge"
     _DUMP_OK_SIGNATURE = "UI hierchary dumped to"
+    _BOUNDS_RE = re.compile(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$")
     _DUMP_AND_READ_CMD = (
-        "for _i in 1 2 3 4; do "
-        "_w=$(dumpsys window 2>/dev/null | grep -E 'Window #.*Application Not Responding:|mCurrentFocus=|mFocusedApp='); "
-        "if echo \"$_w\" | grep -q 'Application Not Responding:'; then "
-        "if [ \"$_i\" -ge 3 ] && ! echo \"$_w\" | grep -q 'Application Not Responding: com.snapchat.android'; then "
+        "stop tombstoned >/dev/null 2>&1 || true; "
+        "killall -9 crash_dump64 crash_dump32 2>/dev/null || true; "
+        "for _i in 1 2 3; do "
+        "_w=$(dumpsys window displays 2>/dev/null | grep -E 'mCurrentFocus=|mFocusedApp='); "
+        "if echo \"$_w\" | grep -q 'mCurrentFocus=.*Application Not Responding:'; then "
+        "if [ \"$_i\" -ge 2 ] && ! echo \"$_w\" | grep -q 'Application Not Responding: com.snapchat.android'; then "
         "input tap 540 1205; "
         "else "
         "input tap 540 1340; "
         "fi; "
-        "sleep 0.9; "
+        "sleep 0.8; "
         "elif echo \"$_w\" | grep -q 'mCurrentFocus=null'; then "
-        "sleep 1.0; "
+        "sleep 0.8; "
         "else break; fi; "
         "done; "
         "if echo \"$_w\" | grep -q 'LoginSignupActivity'; then "
         "echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><hierarchy rotation=\"0\"><node index=\"0\" text=\"Already have an account? Log In\" resource-id=\"com.snapchat.android:id/login_button_horizontal\" package=\"com.snapchat.android\" class=\"android.widget.Button\" bounds=\"[0,0][1080,2400]\" /></hierarchy>'; "
         "exit 0; "
         "fi; "
-        "if echo \"$_w\" | grep -Eq 'nexuslauncher|launcher3|documentsui'; then "
+        "if echo \"$_w\" | grep -q 'mFocusedApp=' && ! echo \"$_w\" | grep -Eq 'com\\.snapchat\\.android|permissioncontroller'; then "
         "am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 "
         "-n com.snapchat.android/com.snapchat.android.LandingPageActivity >/dev/null 2>&1; "
-        "sleep 2.0; "
+        "sleep 1.8; "
         "fi; "
         "killall -9 uiautomator app_process 2>/dev/null || true; "
         "rm -f /data/local/tmp/uidump.xml; "
         "if [ -f /data/local/tmp/fast_uiautomator_v2.jar ]; then "
-        "timeout -k 1 8 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
+        "timeout -k 1 7 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
         "app_process /system/bin com.android.commands.uiautomator.Launcher dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
-        "if ! grep -q '<node ' /data/local/tmp/uidump.xml 2>/dev/null; then "
-        "sleep 0.8; "
+        "if ! grep -Eq 'package=\"(com\\.snapchat\\.android|android|com\\.(google\\.)?android\\.permissioncontroller)\"' /data/local/tmp/uidump.xml 2>/dev/null; then "
         "killall -9 uiautomator app_process 2>/dev/null || true; "
-        "timeout -k 1 8 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
+        "timeout -k 1 6 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
+        "app_process /system/bin com.android.commands.uiautomator.Launcher dump /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "fi; "
+        "if ! grep -Eq 'package=\"(com\\.snapchat\\.android|android|com\\.(google\\.)?android\\.permissioncontroller)\"' /data/local/tmp/uidump.xml 2>/dev/null; then "
+        "sleep 0.6; "
+        "killall -9 uiautomator app_process 2>/dev/null || true; "
+        "timeout -k 1 7 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
         "app_process /system/bin com.android.commands.uiautomator.Launcher dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
         "fi; "
         "else "
-        "timeout -k 1 12 uiautomator dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "timeout -k 1 10 uiautomator dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
         "fi; "
         "cat /data/local/tmp/uidump.xml 2>/dev/null"
     )
@@ -177,9 +186,32 @@ class PhoneController:
     def shell(self, command: str, timeout: int = 45) -> str:
         return self.manager.adb(self.avd_name, "shell", command, timeout=timeout)
 
+    @classmethod
+    def _fix_relative_window_bounds(cls, h_elem: ET.Element) -> None:
+        """Translate window-relative child node bounds inside floating dialog windows (e.g. Android 16 AppErrDialog)."""
+        top_children = list(h_elem)
+        if not top_children:
+            return
+        root_bounds = top_children[0].attrib.get("bounds", "")
+        m = cls._BOUNDS_RE.match(root_bounds)
+        if not m:
+            return
+        wx1, wy1 = int(m.group(1)), int(m.group(2))
+        if wy1 <= 100:
+            return
+        for node in top_children[0].iter():
+            if node is top_children[0]:
+                continue
+            nb = node.attrib.get("bounds", "")
+            nm = cls._BOUNDS_RE.match(nb)
+            if nm:
+                nx1, ny1, nx2, ny2 = int(nm.group(1)), int(nm.group(2)), int(nm.group(3)), int(nm.group(4))
+                if ny1 < wy1:
+                    node.attrib["bounds"] = f"[{nx1 + wx1},{ny1 + wy1}][{nx2 + wx1},{ny2 + wy1}]"
+
     def fetch_xml(
         self,
-        max_retries: int = 1,
+        max_retries: int = 2,
         initial_delay: float = 0.7,
         auto_dismiss_anr: bool = True,
     ) -> Element:
@@ -210,19 +242,32 @@ class PhoneController:
                     merged = ET.Element("hierarchy", {"rotation": "0"})
                     fg_nodes = []
                     launcher_nodes = []
-                    sys_nodes = []
                     for h in root.findall(".//hierarchy"):
+                        self._fix_relative_window_bounds(h)
                         for child in list(h):
                             pkg = child.attrib.get("package", "")
                             if pkg in ("com.android.systemui", "com.google.android.inputmethod.latin"):
-                                sys_nodes.append(child)
-                            elif pkg in ("com.google.android.apps.nexuslauncher", "com.android.launcher3"):
-                                launcher_nodes.append(child)
-                            else:
+                                continue
+                            elif pkg in (
+                                "com.snapchat.android",
+                                "android",
+                                "com.android.permissioncontroller",
+                                "com.google.android.permissioncontroller",
+                            ):
                                 fg_nodes.append(child)
-                    for node in (fg_nodes or launcher_nodes or sys_nodes):
+                            else:
+                                launcher_nodes.append(child)
+                    for node in (fg_nodes or launcher_nodes):
                         merged.append(node)
                     root = merged
+                else:
+                    self._fix_relative_window_bounds(root)
+                    for child in list(root):
+                        if child.attrib.get("package", "") in (
+                            "com.android.systemui",
+                            "com.google.android.inputmethod.latin",
+                        ):
+                            root.remove(child)
 
                 if len(root) == 0 and attempt < max_retries:
                     attempt += 1
