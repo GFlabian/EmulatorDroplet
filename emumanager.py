@@ -605,6 +605,25 @@ class EmulatorManager:
             report("Opening Snapchat")
             self.start_app(name, SNAPCHAT_PACKAGE)
             time.sleep(10)
+            try:
+                self.adb(
+                    name,
+                    "shell",
+                    "for _i in 1 2 3; do "
+                    "_w=$(dumpsys window displays 2>/dev/null | grep -E 'mCurrentFocus=|mFocusedApp='); "
+                    "if echo \"$_w\" | grep -q 'Application Not Responding:'; then "
+                    "input tap 540 1340; sleep 1.0; "
+                    "else break; fi; "
+                    "done; "
+                    "if ! dumpsys window displays 2>/dev/null | grep -q 'com.snapchat.android'; then "
+                    "am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 "
+                    "-n com.snapchat.android/com.snapchat.android.LandingPageActivity >/dev/null 2>&1; "
+                    "sleep 2.0; "
+                    "fi",
+                    timeout=20,
+                )
+            except Exception:
+                pass
         except BaseException:
             self.delete(name)
             raise
@@ -670,7 +689,7 @@ class EmulatorManager:
                 "hw.lcd.width": width, "hw.lcd.height": height, "hw.lcd.density": density,
                 "hw.gpu.enabled": "yes", "hw.gpu.mode": "auto", "hw.keyboard": "yes", "hw.mainKeys": "no",
                 "hw.audioInput": "no", "hw.audioOutput": "no", "hw.camera.back": "emulated",
-                "hw.camera.front": "none", "hw.sdCard": "no", "fastboot.forceColdBoot": "yes",
+                "hw.camera.front": "emulated", "hw.sdCard": "no", "fastboot.forceColdBoot": "yes",
                 "showDeviceFrame": "no",
             }
             avd_dir = self._avd_dir(name)

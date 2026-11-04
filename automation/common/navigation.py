@@ -51,7 +51,7 @@ def detect_location_from_xml(xml: Element, fallback: str = Location.UNKNOWN) -> 
     return fallback
 
 
-def go_to_main_page(controller: PhoneController, max_click_attempts: int = 3) -> Element:
+def go_to_main_page(controller: PhoneController, max_click_attempts: int = 5) -> Element:
     """Navigate back to MAIN_PAGE via normal UI clicks; if that fails, restart Snapchat.
 
     Updates controller.location to Location.MAIN_PAGE and returns the MAIN_PAGE XML Element.
@@ -83,6 +83,12 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 3) ->
                 break
         if popup_handled:
             time.sleep(1.0)
+            continue
+
+        # If XML is empty or Snapchat is still rendering its initial splash screen (no clickable UI yet),
+        # do NOT press BACK (which would exit Snapchat to the home screen); wait for it to finish loading.
+        if len(xml._element) == 0 or (len(xml.clickable_elements) == 0 and "com.snapchat.android" in xml.raw):
+            time.sleep(2.5)
             continue
 
         # 0. If a Spotlight Comments drawer or modal bottom sheet is open over the screen,

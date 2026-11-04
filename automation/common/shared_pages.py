@@ -134,6 +134,7 @@ class UpsellDismissPopupPage(XmlPage):
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
         for rid in (
+            "android:id/button2",
             "sponsored_snap_eu_modal_smaller_ads_btn",
             "sponsored_snap_eu_modal_larger_ads_btn",
             "impala/photo_upsell_tray_dismiss_button",

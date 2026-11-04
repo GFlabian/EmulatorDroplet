@@ -2,7 +2,22 @@
 
 from automation.common.models import Element
 from automation.common.page_rule import XmlPageRule
-from automation.common.shared_rules import MainCameraPageRule
+
+# Any main tab screen (Camera, Spotlight, Chat, Stories, Map) that has the top-left profile avatar
+MainCameraPageRule = XmlPageRule(
+    include=[
+        "com.snapchat.android:id/neon_header_avatar",
+        "com.snapchat.android:id/ngs_camera_icon_container",
+    ],
+    exclude=[
+        "unified_profile_dismiss_button",
+        "unified_profile_icon_button_settings",
+        "profile_scroll_view",
+        "com.snapchat.android:id/input_field_edit_text",
+        "bitmoji_profile/menu_tray_dismiss_button",
+        "search-textfield",
+    ],
+)
 
 # Bitmoji avatar tray that can pop up if the 3D bitmoji area on Profile is tapped/swiped
 BitmojiMenuTrayRule = XmlPageRule(

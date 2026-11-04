@@ -82,6 +82,7 @@ UpsellDismissPopupRule = XmlPageRule(
         "com.snapchat.android:id/alert_dialog_title",
         'text="Say Hi to My AI"',
         "built on generative AI technology",
+        "unable to open the camera",
     ]
 )
 
@@ -100,6 +101,8 @@ AndroidLauncherRule = XmlPageRule(
         "com.google.android.apps.nexuslauncher:id/workspace",
         "com.google.android.apps.nexuslauncher:id/hotseat",
         "com.android.launcher3:id/workspace",
+        "com.google.android.documentsui",
+        "com.android.documentsui",
     ],
     exclude=[
         "com.snapchat.android:id/",
