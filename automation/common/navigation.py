@@ -51,7 +51,7 @@ def detect_location_from_xml(xml: Element, fallback: str = Location.UNKNOWN) -> 
     return fallback
 
 
-def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) -> Element:
+def go_to_main_page(controller: PhoneController, max_click_attempts: int = 3) -> Element:
     """Navigate back to MAIN_PAGE via normal UI clicks; if that fails, restart Snapchat.
 
     Updates controller.location to Location.MAIN_PAGE and returns the MAIN_PAGE XML Element.
@@ -60,7 +60,7 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
 
     for attempt in range(max_click_attempts):
         try:
-            xml = controller.fetch_xml()
+            xml = controller.fetch_xml(max_retries=0)
         except Exception:
             break
 
@@ -90,7 +90,7 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 4) ->
         if camera_tabs:
             controller.click_element(camera_tabs[0])
             time.sleep(2.0)
-            xml_after = controller.fetch_xml()
+            xml_after = controller.fetch_xml(max_retries=0)
             if is_on_main_page(xml_after):
                 controller.set_location(Location.MAIN_PAGE)
                 return xml_after

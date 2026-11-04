@@ -13,6 +13,7 @@ ChatsListWithMyAiRule = XmlPageRule(
         "com.snapchat.android:id/ff_item",
         "com.snapchat.android:id/ptr_container",
         "list-picker-pill-Unread",
+        'content-desc="Add Friends"',
     ],
     exclude=[
         "com.snapchat.android:id/camera_page",

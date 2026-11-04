@@ -453,6 +453,8 @@ class EmulatorManager:
         self._baking = set()
         self._lock = threading.RLock()  # parallel spawns: one at a time picks a name/port
         self._apk_locks = {}
+        self._spawn_sem = threading.BoundedSemaphore(2 if not IS_WINDOWS else 4)
+        self._install_sem = threading.BoundedSemaphore(2)
         emu_bin = "emulator.exe" if IS_WINDOWS else "emulator"
         adb_bin = "adb.exe" if IS_WINDOWS else "adb"
         self.emulator_exe = self.sdk_root / "emulator" / emu_bin
@@ -584,24 +586,26 @@ class EmulatorManager:
             android=resolved_android,
             device_label=device_label,
         )
-        try:
-            self.start(name, headless=headless, timeout=timeout, slim=slim, proxy=proxy, on_status=on_status)
-            if db_cfg.android_id:
-                try:
-                    self.adb(name, "shell", f"settings put secure android_id {_sh_quote(db_cfg.android_id)}", timeout=15)
-                except Exception:
-                    pass
-            for path in resolved_apks:
-                report(f"Installing {Path(path).name} & granting permissions")
-                self.install(name, path)
-            report(f"Loading Snapchat session ({clean_user})")
-            self.load_snapchat_session(name, clean_user, on_status=on_status, auth=db_cfg.auth)
-            report("Opening Snapchat")
-            self.start_app(name, SNAPCHAT_PACKAGE)
-            time.sleep(12)
-        except BaseException:
-            self.delete(name)
-            raise
+        report("Waiting for worker boot slot...")
+        with self._spawn_sem:
+            try:
+                self.start(name, headless=headless, timeout=timeout, slim=slim, proxy=proxy, on_status=on_status)
+                if db_cfg.android_id:
+                    try:
+                        self.adb(name, "shell", f"settings put secure android_id {_sh_quote(db_cfg.android_id)}", timeout=15)
+                    except Exception:
+                        pass
+                for path in resolved_apks:
+                    report(f"Installing {Path(path).name} & granting permissions")
+                    self.install(name, path)
+                report(f"Loading Snapchat session ({clean_user})")
+                self.load_snapchat_session(name, clean_user, on_status=on_status, auth=db_cfg.auth)
+                report("Opening Snapchat")
+                self.start_app(name, SNAPCHAT_PACKAGE)
+                time.sleep(16)
+            except BaseException:
+                self.delete(name)
+                raise
         return Device(self, name)
 
     def spawn_many(self, count, **options):
@@ -641,8 +645,8 @@ class EmulatorManager:
         width = width if width is not None else 1080
         height = height if height is not None else 2400
         density = density if density is not None else 450
-        ram_mb = ram_mb if ram_mb is not None else 2560
-        cores = cores if cores is not None else 4
+        ram_mb = ram_mb if ram_mb is not None else 3584
+        cores = cores if cores is not None else (4 if IS_WINDOWS else 2)
         img = self._resolve_image(image)
         props_wanted = self._normalize_props(props or {})
         source = _read_props(img / "source.properties")
@@ -660,7 +664,7 @@ class EmulatorManager:
                 "target": target, "image.sysdir.1": str(img.relative_to(self.sdk_root)).replace("\\", "/") + "/",
                 "tag.id": tag_id, "tag.display": source.get("SystemImage.TagDisplay", tag_id),
                 "abi.type": abi, "hw.cpu.arch": abi, "hw.cpu.ncore": cores, "PlayStore.enabled": "no",
-                "hw.ramSize": f"{ram_mb}M", "vm.heapSize": "228M", "disk.dataPartition.size": f"{data_gb}G",
+                "hw.ramSize": f"{ram_mb}M", "vm.heapSize": "384M", "disk.dataPartition.size": f"{data_gb}G",
                 "hw.lcd.width": width, "hw.lcd.height": height, "hw.lcd.density": density,
                 "hw.gpu.enabled": "yes", "hw.gpu.mode": "auto", "hw.keyboard": "yes", "hw.mainKeys": "no",
                 "hw.audioInput": "no", "hw.audioOutput": "no", "hw.camera.back": "emulated",
@@ -762,17 +766,24 @@ class EmulatorManager:
         self._log(f"{name}: booted")
         if slim and not self._state(name).get("slimmed"):
             if on_status is not None:
-                on_status("Removing bloatware & configuring settings")
-            script = "; ".join([f"pm uninstall --user 0 {p} >/dev/null 2>&1" for p in BLOAT] +
-                               [f"settings put global {k} 0" for k in
-                                ("window_animation_scale", "transition_animation_scale", "animator_duration_scale")] +
-                               ["settings put secure stylus_handwriting_enabled 0",
-                                "settings put global hide_error_dialogs 0",
-                                "settings put secure anr_show_background 0",
-                                "settings put global block_untrusted_touches 0"])
-            self._run_adb("-s", serial, "shell", script, timeout=120)
+                on_status("Configuring system settings")
+            script = "; ".join([
+                "setprop ctl.stop logd >/dev/null 2>&1 || true",
+                *[f"settings put global {k} 0" for k in
+                  ("window_animation_scale", "transition_animation_scale", "animator_duration_scale")],
+                "settings put secure stylus_handwriting_enabled 0",
+                "settings put global hide_error_dialogs 0",
+                "settings put secure anr_show_background 0",
+                "settings put global block_untrusted_touches 0",
+                "cmd appops set com.google.android.gms RUN_IN_BACKGROUND ignore >/dev/null 2>&1 || true",
+                "cmd appops set com.google.android.gms RUN_ANY_IN_BACKGROUND ignore >/dev/null 2>&1 || true",
+            ])
+            try:
+                self._run_adb("-s", serial, "shell", script, timeout=60)
+            except Exception as exc:
+                self._log(f"{name}: slim settings warning: {exc}")
             self._save_state(name, slimmed=True)
-            self._log(f"{name}: removed preinstalled apps, animations off")
+            self._log(f"{name}: configured system settings, animations off")
         if name not in self._baking and self._state(name).get("pending_props"):
             self._baking.add(name)
             try:
@@ -919,6 +930,7 @@ class EmulatorManager:
         """Launch an installed app's main launcher activity on a running emulator."""
         if package == SNAPCHAT_PACKAGE:
             script = (
+                "setprop ctl.stop logd >/dev/null 2>&1 || true; "
                 "am start -a android.intent.action.MAIN "
                 "-c android.intent.category.LAUNCHER "
                 "-f 0x10200000 "
@@ -937,15 +949,10 @@ class EmulatorManager:
         return (result.stdout + result.stderr).strip()
 
     def install(self, name, apk, timeout=600):
-        before = set(self._packages_3p(name))
-        output = self.adb(name, "install", "-r", str(apk), timeout=timeout)
+        with self._install_sem:
+            output = self.adb(name, "install", "-r", "-g", str(apk), timeout=timeout)
         if "Success" not in output:
             raise EmulatorError(f"installing {apk} on {name} failed: {output}")
-        after = set(self._packages_3p(name))
-        pkgs = sorted(after - before) or ([SNAPCHAT_PACKAGE] if SNAPCHAT_PACKAGE in after else sorted(after))
-        if pkgs:
-            grants = "; ".join(f"pm grant {pkg} {perm} >/dev/null 2>&1" for pkg in pkgs for perm in PERMISSIONS)
-            self.adb(name, "shell", grants, timeout=60)
         self._log(f"{name}: installed {Path(apk).name}")
 
     def _packages_3p(self, name):
@@ -1351,12 +1358,14 @@ class EmulatorManager:
             # chmod: adb's umask is 0 and the overlay shows this dir's mode for /product/etc
             script = [f"mkdir -p {folder}", f"chmod 755 {folder}",
                       f"[ -f {target} ] || cp -a {PROP_TARGET} {target}"]
-        script += [f"sed -i '/^{key.replace('.', '[.]')}=/d' {files} 2>/dev/null" for key in changes]
+        sed_exprs = " ".join(f"-e '/^{key.replace('.', '[.]')}=/d'" for key in changes)
+        if sed_exprs:
+            script.append(f"sed -i {sed_exprs} {files} 2>/dev/null || true")
         script.append(f"[ -n \"$(tail -c1 {target})\" ] && echo >> {target}")
         script.append("printf '%s\\n' " + " ".join(_sh_quote(f"{k}={v}") for k, v in changes.items())
                       + f" >> {target}")
         script.append("sync")
-        self.adb(name, "shell", "; ".join(script), timeout=60)
+        self.adb(name, "shell", "; ".join(script), timeout=120)
         self._log(f"{name}: wrote {len(changes)} properties, rebooting")
         if on_status is not None:
             on_status("Rebooting to apply properties")

@@ -27,7 +27,7 @@ class PhoneController:
     _DUMP_OK_SIGNATURE = "UI hierchary dumped to"
     _DUMP_AND_READ_CMD = (
         "rm -f /data/local/tmp/uidump.xml; "
-        "timeout 12 uiautomator dump --compressed /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "timeout 18 uiautomator dump --compressed /data/local/tmp/uidump.xml >/dev/null 2>&1; "
         "cat /data/local/tmp/uidump.xml 2>/dev/null"
     )
 
@@ -144,7 +144,7 @@ class PhoneController:
 
     def fetch_xml(
         self,
-        max_retries: int = 3,
+        max_retries: int = 1,
         initial_delay: float = 0.7,
         auto_dismiss_anr: bool = True,
     ) -> Element:
@@ -154,7 +154,7 @@ class PhoneController:
         attempt = 0
         while attempt <= max_retries:
             try:
-                out = self.shell(self._DUMP_AND_READ_CMD, timeout=22)
+                out = self.shell(self._DUMP_AND_READ_CMD, timeout=25)
                 xml_str = self._extract_xml(out)
 
                 if xml_str is None:
