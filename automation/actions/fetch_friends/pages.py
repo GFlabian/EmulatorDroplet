@@ -45,7 +45,7 @@ class DismissBitmojiMenuTrayPage(XmlPage):
 
 
 class ProfileScrollToMyFriendsPage(XmlPage):
-    """Pulls up the Profile bottom sheet from y=2250 so 'My Friends' becomes visible."""
+    """Pulls up the Profile bottom sheet so 'My Friends' becomes visible."""
 
     def __init__(self):
         super().__init__(ProfileNeedsScrollToMyFriendsRule)
@@ -53,8 +53,8 @@ class ProfileScrollToMyFriendsPage(XmlPage):
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
         controller.report_status("Scrolling Profile to My Friends...")
         controller.set_location(Location.PROFILE_PAGE)
-        # Swipe up starting inside the bottom profile identity card (y=2250 -> y=500)
-        controller.swipe(Point(540, 2250), Point(540, 500), duration_ms=400)
+        # Swipe up starting inside the profile sheet (y=2000 -> y=400, avoiding bottom system nav bar)
+        controller.swipe(Point(540, 2000), Point(540, 400), duration_ms=380)
         time.sleep(1.4)
 
 

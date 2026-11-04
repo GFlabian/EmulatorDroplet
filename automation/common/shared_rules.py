@@ -127,6 +127,8 @@ AccountLoggedOutRule = XmlPageRule(
         "com.snapchat.android:id/login_text",
         "Already have an account? Log In",
         "com.snapchat.android:id/login_button_horizontal",
+        "com.snapchat.android:id/account_login_button",
+        'text="Remove account"',
     ],
     exclude=[
         "com.snapchat.android:id/ngs_camera_icon_container",

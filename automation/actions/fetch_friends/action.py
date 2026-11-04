@@ -69,7 +69,7 @@ class FetchFriendsAction(BaseAction):
             final_pages=[FriendsListReadyFinalPage()],
             timeout=35,
             execute_last_page=True,
-            max_executions_same_page=3,
+            max_executions_same_page=5,
         )
         service.execute(controller)
         controller.set_location(Location.FRIENDS_LIST_PAGE)

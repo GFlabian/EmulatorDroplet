@@ -85,6 +85,14 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 3) ->
             time.sleep(1.0)
             continue
 
+        # 0. If a Spotlight Comments drawer or modal bottom sheet is open over the screen,
+        # dismiss it first before clicking background navigation icons.
+        raw_lower = xml.raw.lower()
+        if "add a comment" in raw_lower or "comments use your display name" in raw_lower or "no comments yet" in raw_lower:
+            controller.send_key(KeyType.BACK)
+            time.sleep(1.2)
+            continue
+
         # 1. If the bottom nav bar's Camera icon is visible, click it directly
         camera_tabs = xml.get_elements_by_id("com.snapchat.android:id/ngs_camera_icon_container")
         if camera_tabs:

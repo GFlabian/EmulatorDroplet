@@ -27,7 +27,13 @@ class PhoneController:
     _DUMP_OK_SIGNATURE = "UI hierchary dumped to"
     _DUMP_AND_READ_CMD = (
         "rm -f /data/local/tmp/uidump.xml; "
-        "timeout 18 uiautomator dump --compressed /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "if [ -f /data/local/tmp/fast_uiautomator.jar ]; then "
+        "timeout 10 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator.jar "
+        "app_process /system/bin com.android.commands.uiautomator.Launcher dump /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "fi; "
+        "if [ ! -s /data/local/tmp/uidump.xml ]; then "
+        "timeout 14 uiautomator dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "fi; "
         "cat /data/local/tmp/uidump.xml 2>/dev/null"
     )
 
@@ -56,6 +62,7 @@ class PhoneController:
         self._on_location = on_location
         self._location = initial_location
         self._last_snap_anr_ts: float = 0.0
+        self._fast_uiautomator_checked: bool = False
 
     @property
     def location(self) -> str:
@@ -152,9 +159,15 @@ class PhoneController:
         last_err: Optional[Exception] = None
         anr_dismissals = 0
         attempt = 0
+        if not getattr(self, "_fast_uiautomator_checked", False):
+            self._fast_uiautomator_checked = True
+            try:
+                self.manager.ensure_fast_uiautomator(self.avd_name)
+            except Exception:
+                pass
         while attempt <= max_retries:
             try:
-                out = self.shell(self._DUMP_AND_READ_CMD, timeout=25)
+                out = self.shell(self._DUMP_AND_READ_CMD, timeout=28)
                 xml_str = self._extract_xml(out)
 
                 if xml_str is None:
@@ -165,6 +178,26 @@ class PhoneController:
                     return self.empty_element()
 
                 root = ET.fromstring(xml_str)
+                if root.tag == "displays":
+                    merged = ET.Element("hierarchy", {"rotation": "0"})
+                    app_nodes = []
+                    sys_nodes = []
+                    for h in root.findall(".//hierarchy"):
+                        for child in list(h):
+                            pkg = child.attrib.get("package", "")
+                            if pkg in ("com.android.systemui", "com.google.android.inputmethod.latin"):
+                                sys_nodes.append(child)
+                            else:
+                                app_nodes.append(child)
+                    for node in (app_nodes or sys_nodes):
+                        merged.append(node)
+                    root = merged
+
+                if len(root) == 0 and attempt < max_retries:
+                    attempt += 1
+                    time.sleep(initial_delay)
+                    continue
+
                 elem = Element(root)
                 if auto_dismiss_anr and anr_dismissals < 3:
                     wait_btns = elem.get_elements_by_id("android:id/aerr_wait")
@@ -211,9 +244,12 @@ class PhoneController:
     def _extract_xml(cls, output: str) -> Optional[str]:
         start = output.find("<?xml")
         if start != -1:
-            end = output.rfind("</hierarchy>")
-            if end != -1:
-                return output[start : end + len("</hierarchy>")]
+            end_displays = output.rfind("</displays>")
+            end_hier = output.rfind("</hierarchy>")
+            if end_displays != -1 and end_displays > end_hier:
+                return output[start : end_displays + len("</displays>")]
+            if end_hier != -1:
+                return output[start : end_hier + len("</hierarchy>")]
             if cls._DUMP_OK_SIGNATURE in output:
                 return output[start:]
         return None

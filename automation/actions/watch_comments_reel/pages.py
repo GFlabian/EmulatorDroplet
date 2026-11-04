@@ -37,15 +37,20 @@ class OpenReelCommentsPage(XmlPage):
 
         # If Spotlight tab is still loading its first reel (no action rail yet), or if a previous tap on this reel
         # did not open a comments sheet (e.g. comments disabled on this reel), swipe up to load/advance to a new reel.
-        if (not favs and not rail_clickables) or attempts >= 1:
+        if not favs and not rail_clickables:
+            if attempts >= 2:
+                spot_tabs = xml.get_elements_by_id("com.snapchat.android:id/ngs_spotlight_icon_container")
+                if spot_tabs:
+                    controller.click_element(spot_tabs[0])
+                    time.sleep(1.5)
             controller.swipe(Point(540, 1750), Point(540, 500), duration_ms=320)
-            time.sleep(2.8)
-            xml = controller.fetch_xml()
-            favs = xml.get_elements_by_id("com.snapchat.android:id/favorite")
-            rail_clickables = [
-                el for el in xml.clickable_elements
-                if el.center.x > 880 and 1150 < el.center.y < 2050
-            ]
+            time.sleep(2.5)
+            return
+
+        if attempts >= 1 and attempts % 2 == 1:
+            controller.swipe(Point(540, 1750), Point(540, 500), duration_ms=320)
+            time.sleep(2.2)
+            return
 
         # On Spotlight 14.30, the favorite (heart) button has id="com.snapchat.android:id/favorite" at y=1177..1348,
         # and the Comments button is immediately below it on the right rail at x=940..1066, y=1348..1519.
@@ -92,13 +97,18 @@ class CloseReelCommentsPage(XmlPage):
         super().__init__(ReelCommentsOpenRule)
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        close_attempts = int(context.get("close_comments_attempts", 0))
+        context["close_comments_attempts"] = close_attempts + 1
         controller.report_status("Closing reel comments...")
         close_btns = (
             xml.get_elements_by_id("dismiss-button")
             + xml.get_elements_by_content_desc(["Close", "Dismiss", "Back"])
         )
-        if close_btns:
+        if close_btns and close_attempts == 0:
             controller.click_element(close_btns[0])
+        elif close_attempts % 2 == 1:
+            # Tap above the comments sheet or drag it down
+            controller.click(Point(540, 280))
         else:
             controller.send_key(KeyType.BACK)
         time.sleep(1.4)

@@ -6,7 +6,12 @@ from automation.common.page_rule import XmlPageRule
 
 def _is_comments_sheet_open(xml: Element) -> bool:
     raw_lower = xml.raw.lower()
-    if "add a comment" in raw_lower or "send a comment" in raw_lower or "no comments yet" in raw_lower:
+    if (
+        "add a comment" in raw_lower
+        or "send a comment" in raw_lower
+        or "no comments yet" in raw_lower
+        or "comments use your display name" in raw_lower
+    ):
         return True
     # Check for a Comments title header near the top/middle of the sheet
     for el in xml.get_elements_by_text_containing(["comment", "comments"]) + xml.get_elements_by_content_desc_containing(["close", "dismiss"]):

@@ -59,6 +59,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import zipfile
+import zlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -587,25 +589,25 @@ class EmulatorManager:
             device_label=device_label,
         )
         report("Waiting for worker boot slot...")
-        with self._spawn_sem:
-            try:
+        try:
+            with self._spawn_sem:
                 self.start(name, headless=headless, timeout=timeout, slim=slim, proxy=proxy, on_status=on_status)
                 if db_cfg.android_id:
                     try:
                         self.adb(name, "shell", f"settings put secure android_id {_sh_quote(db_cfg.android_id)}", timeout=15)
                     except Exception:
                         pass
-                for path in resolved_apks:
-                    report(f"Installing {Path(path).name} & granting permissions")
-                    self.install(name, path)
-                report(f"Loading Snapchat session ({clean_user})")
-                self.load_snapchat_session(name, clean_user, on_status=on_status, auth=db_cfg.auth)
-                report("Opening Snapchat")
-                self.start_app(name, SNAPCHAT_PACKAGE)
-                time.sleep(16)
-            except BaseException:
-                self.delete(name)
-                raise
+            for path in resolved_apks:
+                report(f"Installing {Path(path).name} & granting permissions")
+                self.install(name, path)
+            report(f"Loading Snapchat session ({clean_user})")
+            self.load_snapchat_session(name, clean_user, on_status=on_status, auth=db_cfg.auth)
+            report("Opening Snapchat")
+            self.start_app(name, SNAPCHAT_PACKAGE)
+            time.sleep(10)
+        except BaseException:
+            self.delete(name)
+            raise
         return Device(self, name)
 
     def spawn_many(self, count, **options):
@@ -790,7 +792,89 @@ class EmulatorManager:
                 self._bake_pending(name, timeout, on_status=on_status)
             finally:
                 self._baking.discard(name)
+        self.ensure_fast_uiautomator(name)
         return serial
+
+    @staticmethod
+    def _build_fast_uiautomator_jar(src_jar: Path, dst_jar: Path) -> bool:
+        """Patch /system/framework/uiautomator.jar into fast_uiautomator.jar:
+        1. Reduce waitForIdle(1000ms, 10000ms) -> waitForIdle(80ms, 600ms).
+        2. Ignore TimeoutException on animating screens (e.g. Camera / Spotlight / 3D Bitmoji) and still dump XML.
+        3. Automatically fall back to getWindowsOnAllDisplays() when getRootInActiveWindow() returns null.
+        """
+        with zipfile.ZipFile(src_jar, "r") as zin:
+            dex = bytearray(zin.read("classes.dex"))
+
+        # 1. waitForIdle(1000, 10000) -> waitForIdle(80, 600)
+        old_idle = b"\x16\x06\xe8\x03\x16\x08\x10\x27"
+        new_idle = b"\x16\x06\x50\x00\x16\x08\x58\x02"
+        if old_idle not in dex:
+            return False
+        dex = dex.replace(old_idle, new_idle, 1)
+
+        # 2. If getRootInActiveWindow() returns null (0x006d: if-nez v6, +13), jump to 0x004f (--windows mode)
+        old_null_prefix = b"\x39\x06\x0d\x00\x62\x04"
+        idx_null = dex.find(old_null_prefix)
+        if idx_null == -1:
+            return False
+        dex[idx_null : idx_null + 8] = b"\x39\x06\x0d\x00\x28\xe0\x00\x00"
+
+        # 3. In TimeoutException catch block (0x00af), clear v4 and jump to 0x004d to proceed with dump
+        old_catch_prefix = b"\x0d\x04\x62\x05"
+        idx_catch = dex.find(old_catch_prefix)
+        if idx_catch == -1:
+            return False
+        dex[idx_catch : idx_catch + 6] = b"\x0d\x04\x12\x04\x28\x9c"
+
+        # 4. Adjust try_item #0 start from 0x0042 (len 0x34) to 0x0046 (len 0x30) so v5 (UiAutomation) is live
+        old_try = b"\x42\x00\x00\x00\x34\x00"
+        new_try = b"\x46\x00\x00\x00\x30\x00"
+        if old_try not in dex:
+            return False
+        dex = dex.replace(old_try, new_try, 1)
+
+        # 5. Recompute DEX SHA-1 signature and Adler32 checksum
+        dex[12:32] = hashlib.sha1(dex[32:]).digest()
+        dex[8:12] = struct.pack("<I", zlib.adler32(dex[12:]) & 0xFFFFFFFF)
+
+        tmp_dst = dst_jar.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        with zipfile.ZipFile(tmp_dst, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+            zout.writestr("classes.dex", bytes(dex))
+        os.replace(tmp_dst, dst_jar)
+        return True
+
+    def ensure_fast_uiautomator(self, name: str) -> bool:
+        """Ensure /data/local/tmp/fast_uiautomator.jar is installed (mode 0444) on the running emulator."""
+        serial = self.serial(name)
+        if not serial:
+            return False
+        try:
+            chk = self._run_adb(
+                "-s", serial, "shell",
+                "test -s /data/local/tmp/fast_uiautomator.jar && echo READY",
+                timeout=10,
+            ).stdout
+            if "READY" in chk:
+                return True
+            android_ver = self._state(name).get("android", 16)
+            cache_dir = self.apks_dir / "uiautomator_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cached_fast = cache_dir / f"fast_uiautomator_android{android_ver}.jar"
+            with self._lock:
+                if not cached_fast.is_file() or cached_fast.stat().st_size == 0:
+                    raw_jar = cache_dir / f"orig_uiautomator_android{android_ver}_{os.getpid()}.jar"
+                    try:
+                        self._run_adb("-s", serial, "pull", "/system/framework/uiautomator.jar", str(raw_jar), timeout=20)
+                        if not raw_jar.is_file() or not self._build_fast_uiautomator_jar(raw_jar, cached_fast):
+                            return False
+                    finally:
+                        raw_jar.unlink(missing_ok=True)
+            self._run_adb("-s", serial, "push", str(cached_fast), "/data/local/tmp/fast_uiautomator.jar", timeout=20)
+            self._run_adb("-s", serial, "shell", "chmod 0444 /data/local/tmp/fast_uiautomator.jar", timeout=10)
+            return True
+        except Exception as exc:
+            self._log(f"{name}: ensure_fast_uiautomator warning: {exc}")
+            return False
 
     def _bake_pending(self, name, timeout, on_status=None):
         """One-time: write the build properties given at create() into a fresh device."""
