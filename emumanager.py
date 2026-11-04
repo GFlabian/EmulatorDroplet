@@ -1009,6 +1009,8 @@ class EmulatorManager:
 
             if not missing_in_storage:
                 with py7zr.SevenZipFile(archive_path, "r") as zf:
+                    if hasattr(zf, "files") and hasattr(zf.files, "files_list"):
+                        zf.files.files_list = [f for f in zf.files.files_list if f.get("filename") not in (".", "")]
                     zf.extractall(path=extract_dir)
             else:
                 detected_ver = app_version or self._installed_snapchat_version(name)

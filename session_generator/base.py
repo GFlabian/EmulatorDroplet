@@ -27,6 +27,8 @@ class BaseSessionBuilder(ABC):
         target_pkg_dir.mkdir(parents=True, exist_ok=True)
         try:
             with py7zr.SevenZipFile(tpl_path, "r") as zf:
+                if hasattr(zf, "files") and hasattr(zf.files, "files_list"):
+                    zf.files.files_list = [f for f in zf.files.files_list if f.get("filename") not in (".", "")]
                 zf.extractall(path=target_pkg_dir)
         except Exception as exc:
             raise CodecException("TEMPLATE_EXTRACT_FAILED", f"Failed extracting {tpl_path.name}", exc) from exc
