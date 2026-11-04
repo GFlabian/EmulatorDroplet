@@ -1012,6 +1012,22 @@ class EmulatorManager:
                     if hasattr(zf, "files") and hasattr(zf.files, "files_list"):
                         zf.files.files_list = [f for f in zf.files.files_list if f.get("filename") not in (".", "")]
                     zf.extractall(path=extract_dir)
+                for root_dir, dirnames, filenames in os.walk(extract_dir):
+                    root_p = Path(root_dir)
+                    try:
+                        os.chmod(root_p, 0o755)
+                    except OSError:
+                        pass
+                    for d in dirnames:
+                        try:
+                            os.chmod(root_p / d, 0o755)
+                        except OSError:
+                            pass
+                    for fn in filenames:
+                        try:
+                            os.chmod(root_p / fn, 0o644)
+                        except OSError:
+                            pass
             else:
                 detected_ver = app_version or self._installed_snapchat_version(name)
                 if on_status is not None:
@@ -1055,6 +1071,7 @@ class EmulatorManager:
             f"mv /data/local/tmp/{session_name}/{SNAPCHAT_PACKAGE} /data/data/; "
             f"else mv /data/local/tmp/{session_name} /data/data/{SNAPCHAT_PACKAGE}; fi && "
             f"chown -R {user}:{group} /data/data/{SNAPCHAT_PACKAGE} && "
+            f"chmod -R u=rwX,g=rwX /data/data/{SNAPCHAT_PACKAGE} && "
             f"chcon -R {context} /data/data/{SNAPCHAT_PACKAGE} && "
             f"rm -rf /data/local/tmp/{session_name} /data/local/tmp/{session_name}.tar && echo OK"
         )

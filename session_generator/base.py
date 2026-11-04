@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
+import os
 import re
 import sqlite3
 from typing import cast
@@ -30,6 +31,22 @@ class BaseSessionBuilder(ABC):
                 if hasattr(zf, "files") and hasattr(zf.files, "files_list"):
                     zf.files.files_list = [f for f in zf.files.files_list if f.get("filename") not in (".", "")]
                 zf.extractall(path=target_pkg_dir)
+            for root_dir, dirnames, filenames in os.walk(target_pkg_dir):
+                root_p = Path(root_dir)
+                try:
+                    os.chmod(root_p, 0o755)
+                except OSError:
+                    pass
+                for d in dirnames:
+                    try:
+                        os.chmod(root_p / d, 0o755)
+                    except OSError:
+                        pass
+                for fn in filenames:
+                    try:
+                        os.chmod(root_p / fn, 0o644)
+                    except OSError:
+                        pass
         except Exception as exc:
             raise CodecException("TEMPLATE_EXTRACT_FAILED", f"Failed extracting {tpl_path.name}", exc) from exc
 
