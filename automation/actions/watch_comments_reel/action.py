@@ -44,8 +44,23 @@ class WatchCommentsReelAction(BaseAction):
             execute_last_page=True,
             max_executions_same_page=5,
         )
-        open_service.execute(controller)
-        controller.set_location(Location.REEL_COMMENTS_PAGE)
+        try:
+            open_service.execute(controller)
+            controller.set_location(Location.REEL_COMMENTS_PAGE)
+        except AutomationError:
+            last_raw = controller.last_xml.raw if controller.last_xml is not None else ""
+            if "com.snapchat.android:id/ngs_spotlight_icon_container" in last_raw:
+                # If Spotlight comments are disabled or still buffering on these reels, watch the reel instead of failing
+                controller.report_status(f"Watching reel ({wait_time:.1f}s)...")
+                time.sleep(wait_time)
+                controller.set_location(Location.REELS_PAGE)
+                return ActionResult(
+                    status=self.success_status,
+                    error=None,
+                    data={"wait_time": wait_time, "fallback": "watched_reel"},
+                    location=Location.REELS_PAGE,
+                )
+            raise
 
         # 2. Wait the specified duration while viewing comments
         controller.report_status(f"Watching reel comments ({wait_time:.1f}s)...")
@@ -59,7 +74,11 @@ class WatchCommentsReelAction(BaseAction):
             execute_last_page=True,
             max_executions_same_page=4,
         )
-        close_service.execute(controller)
+        try:
+            close_service.execute(controller)
+        except AutomationError:
+            controller.send_key(4)
+            time.sleep(1.2)
         controller.set_location(Location.REELS_PAGE)
 
         return ActionResult(

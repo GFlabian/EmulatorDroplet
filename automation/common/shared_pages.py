@@ -65,6 +65,22 @@ class SystemAnrDialogPage(XmlPage):
             controller.restart_app(wait_seconds=12.0)
             return
 
+        close_btns = xml.get_elements_by_id("android:id/aerr_close")
+        if not close_btns:
+            close_btns = xml.get_elements_by_text(["Close app"])
+
+        # For non-Snapchat ANRs (e.g. "System UI isn't responding"), click "Close app" so Android respawns System UI cleanly.
+        if not is_snapchat_anr and close_btns:
+            controller.click_element(close_btns[0])
+            if "system ui" in xml.raw.lower():
+                try:
+                    controller.shell("pkill -9 com.android.systemui >/dev/null 2>&1 || true", timeout=10)
+                except Exception:
+                    pass
+            controller.sleep(2.0)
+            controller.ensure_app_foreground(wait_seconds=3.0)
+            return
+
         wait_btns = xml.get_elements_by_id("android:id/aerr_wait")
         if not wait_btns:
             wait_btns = xml.get_elements_by_text(["Wait"])
@@ -75,9 +91,6 @@ class SystemAnrDialogPage(XmlPage):
                 controller.ensure_app_foreground(wait_seconds=3.0)
             return
 
-        close_btns = xml.get_elements_by_id("android:id/aerr_close")
-        if not close_btns:
-            close_btns = xml.get_elements_by_text(["Close app"])
         if close_btns:
             controller.click_element(close_btns[0])
             controller.sleep(1.0)

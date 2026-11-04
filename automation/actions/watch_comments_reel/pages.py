@@ -35,6 +35,11 @@ class OpenReelCommentsPage(XmlPage):
             if el.center.x > 880 and 1150 < el.center.y < 2050
         ]
 
+        # If the current reel is actively spinning (loading_spinner) on the first 2 attempts, let it finish loading
+        if "com.snapchat.android:id/loading_spinner" in xml.raw and attempts < 2:
+            time.sleep(2.5)
+            return
+
         # If Spotlight tab is still loading its first reel (no action rail yet), or if a previous tap on this reel
         # did not open a comments sheet (e.g. comments disabled on this reel), swipe up to load/advance to a new reel.
         if not favs and not rail_clickables:
@@ -52,19 +57,19 @@ class OpenReelCommentsPage(XmlPage):
             time.sleep(2.2)
             return
 
-        # On Spotlight 14.30, the favorite (heart) button has id="com.snapchat.android:id/favorite" at y=1177..1348,
-        # and the Comments button is immediately below it on the right rail at x=940..1066, y=1348..1519.
+        # On Spotlight 14.30, the favorite (heart) button has id="com.snapchat.android:id/favorite" at y=1500..1590
+        # (or y=1177..1348), and the Comments button is immediately below it on the right rail at y=1674..1764 (fav_bottom + 125).
         if favs:
             fav_bottom = favs[0].bounds[1].y
             below_fav = [
                 el for el in xml.clickable_elements
-                if el.center.x > 900 and fav_bottom <= el.center.y <= fav_bottom + 220
+                if el.center.x > 900 and fav_bottom <= el.center.y <= fav_bottom + 240
             ]
             if below_fav:
                 controller.click_element(below_fav[0])
                 time.sleep(1.8)
                 return
-            controller.click(Point(1000, fav_bottom + 85))
+            controller.click(Point(996, fav_bottom + 125))
             time.sleep(1.8)
             return
 

@@ -204,11 +204,16 @@ class PhoneController:
                 elem = Element(root)
                 if auto_dismiss_anr and anr_dismissals < 3:
                     wait_btns = elem.get_elements_by_id("android:id/aerr_wait")
+                    close_btns = elem.get_elements_by_id("android:id/aerr_close")
                     if not wait_btns and "isn't responding" in xml_str.lower():
                         wait_btns = elem.get_elements_by_text("Wait")
-                    if wait_btns:
+                    if not close_btns and "isn't responding" in xml_str.lower():
+                        close_btns = elem.get_elements_by_text("Close app")
+                    if wait_btns or close_btns:
                         anr_dismissals += 1
-                        is_snap_anr = "snapchat" in xml_str.lower()
+                        xml_lower = xml_str.lower()
+                        is_snap_anr = "snapchat" in xml_lower
+                        is_sysui_anr = "system ui" in xml_lower
                         now_ts = time.monotonic()
                         last_snap_anr = getattr(self, "_last_snap_anr_ts", 0.0)
                         repeat_snap_anr = is_snap_anr and (now_ts - last_snap_anr <= 45.0)
@@ -217,13 +222,26 @@ class PhoneController:
                         self.log_event(
                             level="WARN",
                             event_type="ANR_AUTO_WAIT",
-                            message=f"Auto-dismissing ANR dialog ({anr_dismissals}/3, repeat={repeat_snap_anr})",
+                            message=f"Auto-dismissing ANR dialog ({anr_dismissals}/3, snap={is_snap_anr}, repeat={repeat_snap_anr})",
                         )
-                        pt = wait_btns[0].click_point
                         if repeat_snap_anr or (anr_dismissals >= 2 and is_snap_anr):
                             self._last_snap_anr_ts = 0.0
                             self.restart_app(wait_seconds=6.0)
+                        elif not is_snap_anr and close_btns:
+                            # For System UI / background service ANRs, click 'Close app' so Android restarts the hung system process cleanly
+                            pt = close_btns[0].click_point
+                            kill_sysui = "pkill -9 com.android.systemui >/dev/null 2>&1 || true; " if is_sysui_anr else ""
+                            self.shell(
+                                f"settings put global block_untrusted_touches 0; "
+                                f"input tap {int(pt.x)} {int(pt.y)}; "
+                                f"{kill_sysui}"
+                                f"am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1",
+                                timeout=15,
+                            )
+                            time.sleep(2.0)
                         else:
+                            target_btn = (wait_btns or close_btns)[0]
+                            pt = target_btn.click_point
                             self.shell(
                                 f"settings put global block_untrusted_touches 0; "
                                 f"am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1; "
