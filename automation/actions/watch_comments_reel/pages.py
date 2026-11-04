@@ -19,6 +19,8 @@ class OpenReelCommentsPage(XmlPage):
         super().__init__(ReelViewActiveRule)
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        attempts = int(context.get("open_comments_attempts", 0))
+        context["open_comments_attempts"] = attempts + 1
         controller.report_status("Opening reel comments...")
         # Dismiss "Swipe Up to Next Story" overlay if present
         ok_btns = xml.get_elements_by_id("com.snapchat.android:id/okay_button")
@@ -27,9 +29,26 @@ class OpenReelCommentsPage(XmlPage):
             time.sleep(1.2)
             xml = controller.fetch_xml()
 
+        favs = xml.get_elements_by_id("com.snapchat.android:id/favorite")
+        rail_clickables = [
+            el for el in xml.clickable_elements
+            if el.center.x > 880 and 1150 < el.center.y < 2050
+        ]
+
+        # If Spotlight tab is still loading its first reel (no action rail yet), or if a previous tap on this reel
+        # did not open a comments sheet (e.g. comments disabled on this reel), swipe up to load/advance to a new reel.
+        if (not favs and not rail_clickables) or attempts >= 1:
+            controller.swipe(Point(540, 1750), Point(540, 500), duration_ms=320)
+            time.sleep(2.8)
+            xml = controller.fetch_xml()
+            favs = xml.get_elements_by_id("com.snapchat.android:id/favorite")
+            rail_clickables = [
+                el for el in xml.clickable_elements
+                if el.center.x > 880 and 1150 < el.center.y < 2050
+            ]
+
         # On Spotlight 14.30, the favorite (heart) button has id="com.snapchat.android:id/favorite" at y=1177..1348,
         # and the Comments button is immediately below it on the right rail at x=940..1066, y=1348..1519.
-        favs = xml.get_elements_by_id("com.snapchat.android:id/favorite")
         if favs:
             fav_bottom = favs[0].bounds[1].y
             below_fav = [
@@ -45,10 +64,6 @@ class OpenReelCommentsPage(XmlPage):
             return
 
         # Fallback: right-side action rail clickable elements sorted by vertical position
-        rail_clickables = [
-            el for el in xml.clickable_elements
-            if el.center.x > 880 and 1150 < el.center.y < 2050
-        ]
         rail_clickables.sort(key=lambda e: e.center.y)
         if len(rail_clickables) >= 2:
             # On Spotlight action rail: [Heart/Favorite, Comments, Share/Send, ...]

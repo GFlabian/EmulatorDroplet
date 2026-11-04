@@ -39,6 +39,8 @@ class ChatsListOpenMyAiPage(XmlPage):
         super().__init__(ChatsListWithMyAiRule)
 
     def _run(self, controller: PhoneController, xml: Element, context: dict[str, Any]):
+        attempts = int(context.get("my_ai_search_attempts", 0))
+        context["my_ai_search_attempts"] = attempts + 1
         controller.report_status("Opening My AI chat...")
         ai_nodes = xml.get_elements_by_text("My AI")
         if ai_nodes:
@@ -48,15 +50,23 @@ class ChatsListOpenMyAiPage(XmlPage):
             time.sleep(1.8)
             return
 
-        # Scroll up to top of chat feed if My AI is not immediately visible
+        # If a filter pill like 'Near Me' is active, tap 'All' pill first
+        all_pills = xml.get_elements_by_id("list-picker-pill-all") or xml.get_elements_by_text("All")
+        if all_pills and ("nearby friends" in xml.raw.lower() or attempts >= 1):
+            controller.click_element(all_pills[0])
+            time.sleep(1.5)
+
+        # Pull-to-refresh / scroll up to top of chat feed if My AI is not immediately visible
         controller.swipe(Point(540, 500), Point(540, 1600), duration_ms=350)
-        time.sleep(1.2)
+        time.sleep(2.2)
         xml_after = controller.fetch_xml()
         ai_nodes = xml_after.get_elements_by_text("My AI")
-        if not ai_nodes:
+        if ai_nodes:
+            controller.click(Point(400, ai_nodes[0].center.y))
+            time.sleep(1.8)
+            return
+        if attempts >= 3:
             raise AutomationError("MY_AI_NOT_FOUND", "Could not find 'My AI' row in Chats list")
-        controller.click(Point(400, ai_nodes[0].center.y))
-        time.sleep(1.8)
 
 
 class DismissSayHiToMyAiDialogPage(XmlPage):
