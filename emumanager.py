@@ -648,7 +648,7 @@ class EmulatorManager:
         height = height if height is not None else 2400
         density = density if density is not None else 450
         ram_mb = ram_mb if ram_mb is not None else 3584
-        cores = cores if cores is not None else (4 if IS_WINDOWS else 2)
+        cores = cores if cores is not None else (4 if IS_WINDOWS else 3)
         img = self._resolve_image(image)
         props_wanted = self._normalize_props(props or {})
         source = _read_props(img / "source.properties")
@@ -770,7 +770,7 @@ class EmulatorManager:
             if on_status is not None:
                 on_status("Configuring system settings")
             script = "; ".join([
-                "setprop ctl.stop logd >/dev/null 2>&1 || true",
+                "logcat -G 64K >/dev/null 2>&1 || true",
                 *[f"settings put global {k} 0" for k in
                   ("window_animation_scale", "transition_animation_scale", "animator_duration_scale")],
                 "settings put secure stylus_handwriting_enabled 0",
@@ -797,13 +797,20 @@ class EmulatorManager:
 
     @staticmethod
     def _build_fast_uiautomator_jar(src_jar: Path, dst_jar: Path) -> bool:
-        """Patch /system/framework/uiautomator.jar into fast_uiautomator.jar:
-        1. Reduce waitForIdle(1000ms, 10000ms) -> waitForIdle(80ms, 600ms).
-        2. Ignore TimeoutException on animating screens (e.g. Camera / Spotlight / 3D Bitmoji) and still dump XML.
-        3. Automatically fall back to getWindowsOnAllDisplays() when getRootInActiveWindow() returns null.
+        """Patch /system/framework/uiautomator.jar into fast_uiautomator_v2.jar:
+        1. Always set FLAG_RETRIEVE_INTERACTIVE_WINDOWS (NOP if-eqz v3 at 0x0024).
+        2. Reduce waitForIdle(1000ms, 10000ms) -> waitForIdle(80ms, 600ms).
+        3. Ignore TimeoutException on animating screens (e.g. Camera / Spotlight / 3D Bitmoji) and still dump XML.
+        4. Automatically fall back to getWindowsOnAllDisplays() when getRootInActiveWindow() returns null.
         """
         with zipfile.ZipFile(src_jar, "r") as zin:
             dex = bytearray(zin.read("classes.dex"))
+
+        # 0. NOP out 'if-eqz v3, 0040' (38 03 1c 00) right before getServiceInfo (6e 10) so
+        # FLAG_RETRIEVE_INTERACTIVE_WINDOWS (0x40) is always enabled even when falling back from single-window mode.
+        old_win_branch = b"\x38\x03\x1c\x00\x6e\x10"
+        if old_win_branch in dex:
+            dex = dex.replace(old_win_branch, b"\x00\x00\x00\x00\x6e\x10", 1)
 
         # 1. waitForIdle(1000, 10000) -> waitForIdle(80, 600)
         old_idle = b"\x16\x06\xe8\x03\x16\x08\x10\x27"
@@ -844,33 +851,36 @@ class EmulatorManager:
         return True
 
     def ensure_fast_uiautomator(self, name: str) -> bool:
-        """Ensure /data/local/tmp/fast_uiautomator.jar is installed (mode 0444) on the running emulator."""
+        """Ensure /data/local/tmp/fast_uiautomator_v2.jar is installed (mode 0444) on the running emulator."""
         serial = self.serial(name)
         if not serial:
             return False
         try:
             chk = self._run_adb(
                 "-s", serial, "shell",
-                "test -s /data/local/tmp/fast_uiautomator.jar && echo READY",
+                "test -s /data/local/tmp/fast_uiautomator_v2.jar && echo READY",
                 timeout=10,
             ).stdout
             if "READY" in chk:
                 return True
-            android_ver = self._state(name).get("android", 16)
+            sdk_ver = (
+                self._run_adb("-s", serial, "shell", "getprop", "ro.build.version.sdk", timeout=10).stdout.strip()
+                or "36"
+            )
             cache_dir = self.apks_dir / "uiautomator_cache"
             cache_dir.mkdir(parents=True, exist_ok=True)
-            cached_fast = cache_dir / f"fast_uiautomator_android{android_ver}.jar"
+            cached_fast = cache_dir / f"fast_uiautomator_v2_sdk{sdk_ver}.jar"
             with self._lock:
                 if not cached_fast.is_file() or cached_fast.stat().st_size == 0:
-                    raw_jar = cache_dir / f"orig_uiautomator_android{android_ver}_{os.getpid()}.jar"
+                    raw_jar = cache_dir / f"orig_uiautomator_sdk{sdk_ver}_{os.getpid()}.jar"
                     try:
                         self._run_adb("-s", serial, "pull", "/system/framework/uiautomator.jar", str(raw_jar), timeout=20)
                         if not raw_jar.is_file() or not self._build_fast_uiautomator_jar(raw_jar, cached_fast):
                             return False
                     finally:
                         raw_jar.unlink(missing_ok=True)
-            self._run_adb("-s", serial, "push", str(cached_fast), "/data/local/tmp/fast_uiautomator.jar", timeout=20)
-            self._run_adb("-s", serial, "shell", "chmod 0444 /data/local/tmp/fast_uiautomator.jar", timeout=10)
+            self._run_adb("-s", serial, "push", str(cached_fast), "/data/local/tmp/fast_uiautomator_v2.jar", timeout=20)
+            self._run_adb("-s", serial, "shell", "chmod 0444 /data/local/tmp/fast_uiautomator_v2.jar", timeout=10)
             return True
         except Exception as exc:
             self._log(f"{name}: ensure_fast_uiautomator warning: {exc}")
@@ -1014,7 +1024,7 @@ class EmulatorManager:
         """Launch an installed app's main launcher activity on a running emulator."""
         if package == SNAPCHAT_PACKAGE:
             script = (
-                "setprop ctl.stop logd >/dev/null 2>&1 || true; "
+                "logcat -G 64K >/dev/null 2>&1 || true; "
                 "am start -a android.intent.action.MAIN "
                 "-c android.intent.category.LAUNCHER "
                 "-f 0x10200000 "

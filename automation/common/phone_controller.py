@@ -27,11 +27,11 @@ class PhoneController:
     _DUMP_OK_SIGNATURE = "UI hierchary dumped to"
     _DUMP_AND_READ_CMD = (
         "rm -f /data/local/tmp/uidump.xml; "
-        "if [ -f /data/local/tmp/fast_uiautomator.jar ]; then "
-        "timeout 10 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator.jar "
-        "app_process /system/bin com.android.commands.uiautomator.Launcher dump /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "if [ -f /data/local/tmp/fast_uiautomator_v2.jar ]; then "
+        "timeout 10 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
+        "app_process /system/bin com.android.commands.uiautomator.Launcher dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
         "fi; "
-        "if [ ! -s /data/local/tmp/uidump.xml ]; then "
+        "if ! grep -q '<node ' /data/local/tmp/uidump.xml 2>/dev/null; then "
         "timeout 14 uiautomator dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
         "fi; "
         "cat /data/local/tmp/uidump.xml 2>/dev/null"
@@ -180,16 +180,19 @@ class PhoneController:
                 root = ET.fromstring(xml_str)
                 if root.tag == "displays":
                     merged = ET.Element("hierarchy", {"rotation": "0"})
-                    app_nodes = []
+                    fg_nodes = []
+                    launcher_nodes = []
                     sys_nodes = []
                     for h in root.findall(".//hierarchy"):
                         for child in list(h):
                             pkg = child.attrib.get("package", "")
                             if pkg in ("com.android.systemui", "com.google.android.inputmethod.latin"):
                                 sys_nodes.append(child)
+                            elif pkg in ("com.google.android.apps.nexuslauncher", "com.android.launcher3"):
+                                launcher_nodes.append(child)
                             else:
-                                app_nodes.append(child)
-                    for node in (app_nodes or sys_nodes):
+                                fg_nodes.append(child)
+                    for node in (fg_nodes or launcher_nodes or sys_nodes):
                         merged.append(node)
                     root = merged
 
