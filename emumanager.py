@@ -455,7 +455,7 @@ class EmulatorManager:
         self._baking = set()
         self._lock = threading.RLock()  # parallel spawns: one at a time picks a name/port
         self._apk_locks = {}
-        self._spawn_sem = threading.BoundedSemaphore(2 if not IS_WINDOWS else 4)
+        self._spawn_sem = threading.BoundedSemaphore(3 if not IS_WINDOWS else 4)
         self._install_sem = threading.BoundedSemaphore(2)
         emu_bin = "emulator.exe" if IS_WINDOWS else "emulator"
         adb_bin = "adb.exe" if IS_WINDOWS else "adb"
@@ -609,9 +609,11 @@ class EmulatorManager:
                 self.adb(
                     name,
                     "shell",
-                    "for _i in 1 2 3; do "
+                    "for _i in 1 2 3 4; do "
                     "_w=$(dumpsys window displays 2>/dev/null | grep -E 'mCurrentFocus=|mFocusedApp='); "
-                    "if echo \"$_w\" | grep -q 'Application Not Responding:'; then "
+                    "if echo \"$_w\" | grep -Eq 'Application Not Responding: com\\.android\\.systemui|NotificationShade'; then "
+                    "cmd statusbar collapse >/dev/null 2>&1 || true; pkill -9 com.android.systemui >/dev/null 2>&1 || true; input tap 540 1205; sleep 0.8; "
+                    "elif echo \"$_w\" | grep -q 'Application Not Responding:'; then "
                     "input tap 540 1340; sleep 1.0; "
                     "else break; fi; "
                     "done; "
@@ -1057,6 +1059,7 @@ class EmulatorManager:
             script = (
                 "stop tombstoned >/dev/null 2>&1 || true; "
                 "killall -9 crash_dump64 crash_dump32 2>/dev/null || true; "
+                "cmd statusbar collapse >/dev/null 2>&1 || true; "
                 "logcat -G 64K >/dev/null 2>&1 || true; "
                 "am start -a android.intent.action.MAIN "
                 "-c android.intent.category.LAUNCHER "

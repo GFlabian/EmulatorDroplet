@@ -30,15 +30,21 @@ class PhoneController:
     _DUMP_AND_READ_CMD = (
         "stop tombstoned >/dev/null 2>&1 || true; "
         "killall -9 crash_dump64 crash_dump32 2>/dev/null || true; "
-        "for _i in 1 2 3; do "
+        "for _i in 1 2 3 4; do "
         "_w=$(dumpsys window displays 2>/dev/null | grep -E 'mCurrentFocus=|mFocusedApp='); "
-        "if echo \"$_w\" | grep -q 'mCurrentFocus=.*Application Not Responding:'; then "
-        "if [ \"$_i\" -ge 2 ] && ! echo \"$_w\" | grep -q 'Application Not Responding: com.snapchat.android'; then "
+        "if echo \"$_w\" | grep -Eq 'Application Not Responding: com\\.android\\.systemui|NotificationShade'; then "
+        "cmd statusbar collapse >/dev/null 2>&1 || true; "
+        "pkill -9 com.android.systemui >/dev/null 2>&1 || true; "
         "input tap 540 1205; "
-        "else "
-        "input tap 540 1340; "
-        "fi; "
         "sleep 0.8; "
+        "elif echo \"$_w\" | grep -q 'mCurrentFocus=.*Application Not Responding:'; then "
+        "if echo \"$_w\" | grep -q 'Application Not Responding: com.snapchat.android'; then "
+        "input tap 540 1340; "
+        "sleep 1.0; "
+        "else "
+        "input tap 540 1205; "
+        "sleep 0.8; "
+        "fi; "
         "elif echo \"$_w\" | grep -q 'mCurrentFocus=null'; then "
         "sleep 0.8; "
         "else break; fi; "
@@ -55,21 +61,17 @@ class PhoneController:
         "killall -9 uiautomator app_process 2>/dev/null || true; "
         "rm -f /data/local/tmp/uidump.xml; "
         "if [ -f /data/local/tmp/fast_uiautomator_v2.jar ]; then "
-        "timeout -k 1 7 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
+        "timeout -k 1 6 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
         "app_process /system/bin com.android.commands.uiautomator.Launcher dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
         "if ! grep -Eq 'package=\"(com\\.snapchat\\.android|android|com\\.(google\\.)?android\\.permissioncontroller)\"' /data/local/tmp/uidump.xml 2>/dev/null; then "
+        "cmd statusbar collapse >/dev/null 2>&1 || true; "
+        "pkill -9 com.android.systemui >/dev/null 2>&1 || true; "
         "killall -9 uiautomator app_process 2>/dev/null || true; "
         "timeout -k 1 6 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
         "app_process /system/bin com.android.commands.uiautomator.Launcher dump /data/local/tmp/uidump.xml >/dev/null 2>&1; "
         "fi; "
-        "if ! grep -Eq 'package=\"(com\\.snapchat\\.android|android|com\\.(google\\.)?android\\.permissioncontroller)\"' /data/local/tmp/uidump.xml 2>/dev/null; then "
-        "sleep 0.6; "
-        "killall -9 uiautomator app_process 2>/dev/null || true; "
-        "timeout -k 1 7 env CLASSPATH=/system/framework/android.test.runner.jar:/data/local/tmp/fast_uiautomator_v2.jar "
-        "app_process /system/bin com.android.commands.uiautomator.Launcher dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
-        "fi; "
         "else "
-        "timeout -k 1 10 uiautomator dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
+        "timeout -k 1 8 uiautomator dump --windows /data/local/tmp/uidump.xml >/dev/null 2>&1; "
         "fi; "
         "cat /data/local/tmp/uidump.xml 2>/dev/null"
     )
@@ -211,8 +213,8 @@ class PhoneController:
 
     def fetch_xml(
         self,
-        max_retries: int = 2,
-        initial_delay: float = 0.7,
+        max_retries: int = 1,
+        initial_delay: float = 0.6,
         auto_dismiss_anr: bool = True,
     ) -> Element:
         """Dump and parse UIAutomator XML hierarchy from the device."""
@@ -227,7 +229,7 @@ class PhoneController:
                 pass
         while attempt <= max_retries:
             try:
-                out = self.shell(self._DUMP_AND_READ_CMD, timeout=28)
+                out = self.shell(self._DUMP_AND_READ_CMD, timeout=22)
                 xml_str = self._extract_xml(out)
 
                 if xml_str is None:
@@ -287,23 +289,15 @@ class PhoneController:
                         xml_lower = xml_str.lower()
                         is_snap_anr = "snapchat" in xml_lower
                         is_sysui_anr = "system ui" in xml_lower
-                        now_ts = time.monotonic()
-                        last_snap_anr = getattr(self, "_last_snap_anr_ts", 0.0)
-                        repeat_snap_anr = is_snap_anr and (now_ts - last_snap_anr <= 45.0)
-                        if is_snap_anr:
-                            self._last_snap_anr_ts = now_ts
                         self.log_event(
                             level="WARN",
                             event_type="ANR_AUTO_WAIT",
-                            message=f"Auto-dismissing ANR dialog ({anr_dismissals}/3, snap={is_snap_anr}, repeat={repeat_snap_anr})",
+                            message=f"Auto-dismissing ANR dialog ({anr_dismissals}/3, snap={is_snap_anr})",
                         )
-                        if repeat_snap_anr or (anr_dismissals >= 2 and is_snap_anr):
-                            self._last_snap_anr_ts = 0.0
-                            self.restart_app(wait_seconds=6.0)
-                        elif not is_snap_anr and close_btns:
+                        if not is_snap_anr and close_btns:
                             # For System UI / background service ANRs, click 'Close app' so Android restarts the hung system process cleanly
                             pt = close_btns[0].click_point
-                            kill_sysui = "pkill -9 com.android.systemui >/dev/null 2>&1 || true; " if is_sysui_anr else ""
+                            kill_sysui = "cmd statusbar collapse >/dev/null 2>&1 || true; pkill -9 com.android.systemui >/dev/null 2>&1 || true; " if is_sysui_anr else ""
                             self.shell(
                                 f"settings put global block_untrusted_touches 0; "
                                 f"input tap {int(pt.x)} {int(pt.y)}; "
@@ -311,7 +305,7 @@ class PhoneController:
                                 f"am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1",
                                 timeout=15,
                             )
-                            time.sleep(2.0)
+                            time.sleep(1.5)
                         else:
                             target_btn = (wait_btns or close_btns)[0]
                             pt = target_btn.click_point
@@ -321,7 +315,7 @@ class PhoneController:
                                 f"input tap {int(pt.x)} {int(pt.y)}",
                                 timeout=15,
                             )
-                            time.sleep(2.0)
+                            time.sleep(1.5)
                         continue
                 self.last_xml = elem
                 return elem

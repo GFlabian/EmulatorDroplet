@@ -64,7 +64,7 @@ class PagesService:
         while True:
             current_xml = controller.fetch_xml()
             detected_page = self._detect_current_page(
-                current_xml, last_page_ts, local_history, controller=controller
+                current_xml, last_page_ts, local_history, controller=controller, unknown_streak=unknown_streak
             )
 
             if detected_page is None:
@@ -77,13 +77,16 @@ class PagesService:
                     controller.ensure_app_foreground(wait_seconds=4.0)
                     time.sleep(self._poll_interval)
                     continue
-                if unknown_streak == 4:
+                if unknown_streak == 2:
+                    if len(raw) < 450 or "com.snapchat.android" not in raw:
+                        controller.ensure_app_foreground(wait_seconds=3.0)
+                elif unknown_streak == 4:
                     controller.record_unknown_page(
                         reason="UNKNOWN_SCREEN_POLLING",
                         expected_pages=expected_str,
                         xml_element=current_xml,
                     )
-                    if "com.snapchat.android" not in raw:
+                    if len(raw) < 450 or "com.snapchat.android" not in raw:
                         controller.ensure_app_foreground(wait_seconds=3.0)
                 elif unknown_streak == 8:
                     # If the screen is blank or unrecognized for 8 polls (~10-15s), nudge Snapchat to foreground
@@ -123,6 +126,7 @@ class PagesService:
         last_page_ts: float,
         pages_history: list[str],
         controller: Optional[PhoneController] = None,
+        unknown_streak: int = 0,
     ) -> Optional[XmlPage]:
         detected_pages: list[XmlPage] = [
             p for p in self._pages if current_xml is not None and p.is_detected(current_xml)
@@ -174,6 +178,8 @@ class PagesService:
 
         if time.monotonic() - last_page_ts > self._timeout:
             if len(detected_pages) == 0:
+                if unknown_streak < 3:
+                    return None
                 if controller is not None:
                     controller.record_unknown_page(
                         reason="UNKNOWN_PAGE_TIMEOUT",

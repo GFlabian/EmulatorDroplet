@@ -88,7 +88,10 @@ def go_to_main_page(controller: PhoneController, max_click_attempts: int = 5) ->
         # If XML is empty or Snapchat is still rendering its initial splash screen (no clickable UI yet),
         # do NOT press BACK (which would exit Snapchat to the home screen); wait for it to finish loading.
         if len(xml._element) == 0 or (len(xml.clickable_elements) == 0 and "com.snapchat.android" in xml.raw):
-            time.sleep(2.5)
+            if attempt in (2, 4):
+                controller.ensure_app_foreground(wait_seconds=3.0)
+            else:
+                time.sleep(2.5)
             continue
 
         # 0. If a Spotlight Comments drawer or modal bottom sheet is open over the screen,
